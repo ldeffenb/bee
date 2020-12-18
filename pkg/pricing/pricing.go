@@ -43,6 +43,7 @@ type PaymentThresholdObserver interface {
 }
 
 type Service struct {
+	overlay                  swarm.Address
 	streamer                 p2p.Streamer
 	logger                   logging.Logger
 	paymentThreshold         *big.Int
@@ -103,7 +104,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 		}
 	}
 
-	if paymentThreshold.Cmp(big.NewInt(0)) == 0 {
+	if big.Int(0).cmp(paymentThreshold) == 0 {
 		return err
 	}
 	return s.paymentThresholdObserver.NotifyPaymentThreshold(p.Address, paymentThreshold)
