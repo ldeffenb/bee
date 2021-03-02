@@ -43,7 +43,7 @@ func New(st storage.StateStorer, unreserveFunc func(batchID []byte, radius uint8
 		}
 	}
 	rs := &reserveState{}
-	err = st.Get(chainStateKey, rs)
+	err = st.Get(reserveStateKey, rs)
 	if err != nil {
 		if !errors.Is(err, storage.ErrNotFound) {
 			return nil, err
