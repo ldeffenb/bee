@@ -95,10 +95,6 @@ func (bs *BatchStore) Put(batch *postage.Batch, newValue *big.Int, newDepth uint
 	return nil
 }
 
-func (bs *BatchStore) SetUnreserve(func(batchID []byte, depth uint8) error) {
-	panic("not  implemented")
-}
-
 // GetChainState mocks the GetChainState method from the BatchStore
 func (bs *BatchStore) GetChainState() *postage.ChainState {
 	return bs.cs

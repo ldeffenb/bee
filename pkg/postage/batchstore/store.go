@@ -65,7 +65,7 @@ func (s *store) Get(id []byte) (*postage.Batch, error) {
 	return b, err
 }
 
-// Put stores a given batch in the batchstore with the given ID.
+// Put stores a given batch in the batchstore and requires old values of Value and Depth
 func (s *store) Put(b *postage.Batch, value *big.Int, depth uint8) error {
 	oldVal := big.NewInt(0).Set(b.Value)
 	oldDepth := b.Depth
@@ -132,7 +132,6 @@ func batchKey(id []byte) string {
 func valueKey(val *big.Int, id []byte) string {
 	value := make([]byte, 32)
 	val.FillBytes(value) // zero-extended big-endian byte slice
-	// return valueKeyPrefix + string(append(value, id...))
 	return valueKeyPrefix + string(value) + string(id)
 }
 

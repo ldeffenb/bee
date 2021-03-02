@@ -1,4 +1,4 @@
-// Copyright 2020 The Swarm Authors. All rights reserved.
+// Copyright 2021 The Swarm Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -42,7 +42,8 @@ var ErrBatchNotFound = errors.New("postage batch not found or expired")
 // DefaultDepth is the initial depth for the reserve
 const DefaultDepth = 5
 
-// Capacity = number of chunks in reserve
+// Capacity = number of chunks in reserve. `2^23` was chosen to remain
+// relatively near the current 5M chunks ~25GB
 var Capacity = exp2(23)
 
 var big1 = big.NewInt(1)
@@ -61,6 +62,7 @@ func (s *store) unreserve(batchID []byte, radius uint8) error {
 	return s.unreserveFunc(batchID, radius)
 }
 
+// purgeExpired is called when there is 'settlement'
 func (s *store) purgeExpired() error {
 	var toDelete [][]byte
 	err := s.store.Iterate(valueKeyPrefix, func(key, _ []byte) (bool, error) {
@@ -71,6 +73,7 @@ func (s *store) purgeExpired() error {
 		if b.Value.Cmp(s.rs.Core) >= 0 {
 			return true, nil
 		}
+		fmt.Printf("purgeExpired fully unreserve %8x\n", b.ID)
 		err = s.unreserve(b.ID, swarm.MaxPO)
 		if err != nil {
 			return true, err
@@ -93,6 +96,7 @@ func (s *store) purgeExpired() error {
 	return s.delete(toDelete...)
 }
 
+// change captures the batch's change in value
 type change struct {
 	old, new int
 }
@@ -104,6 +108,11 @@ func newChange(oldv, newv, lower, higher *big.Int) *change {
 	}
 }
 
+// cmp checks where value x of a batch falls wrt core and edge layer limit
+// it returns
+// - -1 if x is out of the reserve
+// - 0 if x is in the mid range where chunks are kept within depth
+// - 1 if x is in the top range where chunks are kept within depth - 1
 func cmp(x, lower, higher *big.Int) int {
 	if x.Cmp(lower) < 0 || x.Cmp(big.NewInt(0)) == 0 {
 		return -1
@@ -114,18 +123,22 @@ func cmp(x, lower, higher *big.Int) int {
 	return 1
 }
 
+// if value changed wrt range
 func (ch *change) changed() bool {
 	return ch.old != ch.new
 }
 
+// if the value is increased
 func (ch *change) increased() bool {
 	return ch.old < ch.new
 }
 
+// if value changed from -1 to 1 or 1 to -1
 func (ch *change) double() bool {
 	return ch.old+ch.new == 0
 }
 
+// if currently out of reserve, ie., new value falls in bottom range
 func (ch *change) out() bool {
 	return ch.new < 0
 }
@@ -170,11 +183,11 @@ func (s *store) updateValueChange(b *postage.Batch, oldDepth uint8, oldValue *bi
 	if err := s.unreserve(b.ID, radius); err != nil {
 		return err
 	}
-	return s.release(b)
+	return s.evict(b)
 }
 
-// release is responsible  to bring capacity back to positive by unreserving lowest priority batches
-func (s *store) release(last *postage.Batch) error {
+// evict is responsible for keeping capacity positive by unreserving lowest priority batches
+func (s *store) evict(last *postage.Batch) error {
 	if s.rs.Capacity > 0 {
 		return nil
 	}
@@ -212,7 +225,7 @@ func (s *store) release(last *postage.Batch) error {
 	if s.rs.Capacity < 0 {
 		s.rs.Depth++
 		s.rs.Edge.Set(s.rs.Core) // reset edge limit to core limit
-		return s.release(last)
+		return s.evict(last)
 	}
 	return s.store.Put(reserveStateKey, s.rs)
 }

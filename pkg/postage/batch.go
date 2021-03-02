@@ -15,12 +15,13 @@ type Batch struct {
 	Value  *big.Int // normalised balance of the batch
 	Start  uint64   // block number the batch was created
 	Owner  []byte   // owner's ethereum address
-	Radius uint8    // reserve  radius
+	Radius uint8    // reserve radius
 	Depth  uint8    // batch depth, i.e., size = 2^{depth}
 }
 
 // MarshalBinary implements BinaryMarshaller. It will attempt to serialize the
 // postage batch to a byte slice.
+// serialised as ID(32)|big endian value(32)|start block(8)|owner addr(20)|radius(1)|depth(1)
 func (b *Batch) MarshalBinary() ([]byte, error) {
 	out := make([]byte, 94)
 	copy(out, b.ID)
