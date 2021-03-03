@@ -289,10 +289,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		eventListener := listener.New(logger, swapBackend, postageContractAddress, priceOracleAddress)
 		b.listenerCloser = eventListener
 
-		_, err := batchservice.New(batchStore, logger, eventListener)
-		if err != nil {
-			return nil, err
-		}
+		_ = batchservice.New(batchStore, logger, eventListener)
 
 		erc20Address, err := postagecontract.LookupERC20Address(p2pCtx, transactionService, postageContractAddress)
 		if err != nil {

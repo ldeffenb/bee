@@ -148,6 +148,7 @@ func (s *store) updateValueChange(b *postage.Batch, oldDepth uint8, oldValue *bi
 	newValue := b.Value
 	newDepth := b.Depth
 	defer func() {
+		// if there is capacity but the new batch value is lower, then set core limit to new batch value
 		if s.rs.Capacity > 0 && s.rs.Core.Cmp(newValue) > 0 {
 			s.rs.Core.Set(newValue)
 		}

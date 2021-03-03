@@ -67,7 +67,7 @@ func (s *store) Get(id []byte) (*postage.Batch, error) {
 
 // Put stores a given batch in the batchstore and requires old values of Value and Depth
 func (s *store) Put(b *postage.Batch, value *big.Int, depth uint8) error {
-	oldVal := big.NewInt(0).Set(b.Value)
+	oldVal := new(big.Int).Set(b.Value)
 	oldDepth := b.Depth
 	err := s.store.Delete(valueKey(oldVal, b.ID))
 	if err != nil {

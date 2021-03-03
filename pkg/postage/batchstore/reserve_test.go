@@ -93,7 +93,7 @@ func nextChainState(bStore postage.Storer) (*postage.ChainState, error) {
 		Block: cs.Block + uint64(advance),
 		Price: cs.Price,
 		// settle although no price change
-		Total: cs.Total.Add(cs.Total, big.NewInt(0).Mul(cs.Price, big.NewInt(int64(advance)))),
+		Total: cs.Total.Add(cs.Total, new(big.Int).Mul(cs.Price, big.NewInt(int64(advance)))),
 	}
 	return cs, bStore.PutChainState(cs)
 }
@@ -104,7 +104,7 @@ func addBatch(bStore postage.Storer, cs *postage.ChainState, depth uint8) error 
 	b.Depth = uint8(rand.Intn(10)) + depth + 3
 	// random period -> random value
 	period := rand.Intn(100) + 10
-	value := big.NewInt(0).Mul(cs.Price, big.NewInt(int64(period)))
+	value := new(big.Int).Mul(cs.Price, big.NewInt(int64(period)))
 	value.Add(cs.Total, value)
 	b.Value = big.NewInt(0)
 	// add new postage batch

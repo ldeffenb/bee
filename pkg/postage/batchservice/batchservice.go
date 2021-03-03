@@ -24,11 +24,11 @@ type Interface interface {
 }
 
 // New will create a new BatchService.
-func New(storer postage.Storer, logger logging.Logger, listener postage.Listener) (Interface, error) {
+func New(storer postage.Storer, logger logging.Logger, listener postage.Listener) Interface {
 	svc := &batchService{storer, logger, listener}
 	cs := svc.storer.GetChainState()
 	svc.listener.Listen(cs.Block+1, svc)
-	return svc, nil
+	return svc
 }
 
 // Create will create a new batch with the given ID, owner value and depth and
