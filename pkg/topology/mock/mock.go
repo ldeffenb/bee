@@ -13,6 +13,7 @@ import (
 )
 
 type mock struct {
+	address         swarm.Address
 	peers           []swarm.Address
 	closestPeer     swarm.Address
 	closestPeerErr  error
@@ -64,11 +65,10 @@ func (d *mock) AddPeers(_ context.Context, addrs ...swarm.Address) error {
 		return d.addPeersErr
 	}
 
-	for _, addr := range addrs {
-		d.mtx.Lock()
-		d.peers = append(d.peers, addr)
-		d.mtx.Unlock()
-	}
+	d.mtx.Lock()
+	defer d.mtx.Unlock()
+
+	d.peers = append(d.peers, addrs...)
 
 	return nil
 }
@@ -85,7 +85,7 @@ func (d *mock) Peers() []swarm.Address {
 	return d.peers
 }
 
-func (d *mock) ClosestPeer(_ swarm.Address, skipPeers ...swarm.Address) (peerAddr swarm.Address, err error) {
+func (d *mock) ClosestPeer(address swarm.Address, skipPeers ...swarm.Address) (peerAddr swarm.Address, err error) {
 	if len(skipPeers) == 0 {
 		if d.closestPeerErr != nil {
 			return d.closestPeer, d.closestPeerErr
@@ -97,6 +97,12 @@ func (d *mock) ClosestPeer(_ swarm.Address, skipPeers ...swarm.Address) (peerAdd
 
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
+
+	if len(d.peers) == 0 {
+		return peerAddr, topology.ErrNotFound
+	}
+
+	peerAddr = d.peers[0]
 
 	skipPeer := false
 	for _, p := range d.peers {
@@ -111,7 +117,9 @@ func (d *mock) ClosestPeer(_ swarm.Address, skipPeers ...swarm.Address) (peerAdd
 			continue
 		}
 
-		peerAddr = p
+		if dcmp, _ := swarm.DistanceCmp(address.Bytes(), p.Bytes(), peerAddr.Bytes()); dcmp == 1 {
+			peerAddr = p
+		}
 	}
 
 	if peerAddr.IsZero() {
