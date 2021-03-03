@@ -73,7 +73,6 @@ func (s *store) purgeExpired() error {
 		if b.Value.Cmp(s.rs.Core) >= 0 {
 			return true, nil
 		}
-		fmt.Printf("purgeExpired fully unreserve %8x\n", b.ID)
 		err = s.unreserve(b.ID, swarm.MaxPO)
 		if err != nil {
 			return true, err
