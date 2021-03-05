@@ -14,6 +14,7 @@ import (
 	"github.com/ethersphere/bee/pkg/storage"
 )
 
+func unreserve([]byte, uint8) error { return nil }
 func TestBatchStoreGet(t *testing.T) {
 	testBatch := postagetest.MustNewBatch()
 	key := batchstore.BatchKey(testBatch.ID)
@@ -31,7 +32,7 @@ func TestBatchStorePut(t *testing.T) {
 	key := batchstore.BatchKey(testBatch.ID)
 
 	stateStore := mock.NewStateStore()
-	batchStore, _ := batchstore.New(stateStore, nil)
+	batchStore, _ := batchstore.New(stateStore, unreserve)
 
 	batchStorePutBatch(t, batchStore, testBatch)
 

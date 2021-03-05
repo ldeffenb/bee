@@ -107,6 +107,7 @@ func addBatch(bStore postage.Storer, cs *postage.ChainState, depth uint8) error 
 	value := new(big.Int).Mul(cs.Price, big.NewInt(int64(period)))
 	value.Add(cs.Total, value)
 	b.Value = big.NewInt(0)
+	// then need to
 	// add new postage batch
 	return bStore.Put(b, value, b.Depth)
 }
@@ -122,6 +123,7 @@ func checkReserve(bStore postage.Storer, unreserved map[string]uint8) (uint8, er
 		count++
 		bDepth, found := unreserved[string(b.ID)]
 		if !found {
+			fmt.Printf("info: %8x, value=%d,  %v\n", b.ID, b.Value.Uint64(), bStore)
 			return true, fmt.Errorf("batch not unreserved")
 		}
 		if b.Value.Cmp(limit) >= 0 {

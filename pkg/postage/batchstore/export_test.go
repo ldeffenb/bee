@@ -5,6 +5,7 @@
 package batchstore
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/ethersphere/bee/pkg/postage"
@@ -33,4 +34,8 @@ func IterateAll(bs postage.Storer, f func(b *postage.Batch) (bool, error)) error
 func GetReserve(si postage.Storer) (*big.Int, uint8) {
 	s, _ := si.(*store)
 	return s.rs.Core, s.rs.Depth
+}
+
+func (s *store) String() string {
+	return fmt.Sprintf("core=%d,edge=%d", s.rs.Core.Uint64(), s.rs.Edge.Uint64())
 }

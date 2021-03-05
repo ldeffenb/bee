@@ -146,25 +146,17 @@ func (ch *change) out() bool {
 func (s *store) updateValueChange(b *postage.Batch, oldDepth uint8, oldValue *big.Int) error {
 	newValue := b.Value
 	newDepth := b.Depth
-	defer func() {
-		// if there is capacity but the new batch value is lower, then set core limit to new batch value
-		if s.rs.Capacity > 0 && s.rs.Core.Cmp(newValue) > 0 {
-			s.rs.Core.Set(newValue)
-		}
-	}()
+
 	ch := newChange(oldValue, newValue, s.rs.Core, s.rs.Edge)
-	// if values unchanged then limits dont change
-	if !ch.changed() {
-		return nil
-	}
 	half := exp2(newDepth - s.rs.Depth - 1)
 	// if value drops out then available capacity is increased with the batch's size within neighbourhood
 	if ch.out() {
-		s.rs.Capacity += half
-		if ch.double() {
+		if ch.changed() {
 			s.rs.Capacity += half
+			if ch.double() {
+				s.rs.Capacity += half
+			}
 		}
-		// the chunks of this batch are unreserved in all po bins down to MaxPO
 		return s.unreserve(b.ID, swarm.MaxPO)
 	}
 	// if value decreased and fell below the edge limit, then the freed capacity is added
@@ -188,7 +180,13 @@ func (s *store) updateValueChange(b *postage.Batch, oldDepth uint8, oldValue *bi
 
 // evict is responsible for keeping capacity positive by unreserving lowest priority batches
 func (s *store) evict(last *postage.Batch) error {
+	// if capacity is positive nothing to evict
 	if s.rs.Capacity > 0 {
+		// we readjust the value  limit, if new item  is the minimum so far, reset Core limit
+		if s.rs.Core.Cmp(big.NewInt(0)) == 0 || s.rs.Core.Cmp(last.Value) > 0 {
+			s.rs.Core.Set(last.Value)
+			s.rs.Edge.Set(last.Value)
+		}
 		return nil
 	}
 	err := s.store.Iterate(valueKeyPrefix, func(key, _ []byte) (bool, error) {
@@ -201,7 +199,7 @@ func (s *store) evict(last *postage.Batch) error {
 				return true, fmt.Errorf("release get %x %v: %w", batchID, b, err)
 			}
 		}
-		//  FIXME: this is needed only because  the statestoore iterator does not allow seek, only prefix
+		//  FIXME: this is needed only because  the statestore iterator does not allow seek, only prefix
 		//  so we  need  to  page through all  the batches until edge limit   is reached
 		if b.Value.Cmp(s.rs.Edge) < 0 {
 			return false, nil
