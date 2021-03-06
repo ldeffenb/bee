@@ -13,7 +13,6 @@ import (
 )
 
 type mock struct {
-	address         swarm.Address
 	peers           []swarm.Address
 	closestPeer     swarm.Address
 	closestPeerErr  error
