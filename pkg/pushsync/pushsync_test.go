@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,6 +270,7 @@ func TestPushChunkToNextClosest(t *testing.T) {
 	defer storerPeer2.Close()
 
 	var fail = true
+	var lock sync.Mutex
 
 	recorder := streamtest.New(
 		streamtest.WithProtocols(
@@ -279,6 +281,8 @@ func TestPushChunkToNextClosest(t *testing.T) {
 			func(h p2p.HandlerFunc) p2p.HandlerFunc {
 				return func(ctx context.Context, peer p2p.Peer, stream p2p.Stream) error {
 					// this hack is required to simulate first storer node failing
+					lock.Lock()
+					defer lock.Unlock()
 					if fail {
 						fail = false
 						return errors.New("peer not reachable")
