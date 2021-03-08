@@ -121,13 +121,13 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 		return swarm.ErrInvalidChunk
 	}
 
-	//if the p's address is closer to the chunk than my address, then simply store it and return
+	//if p's address is closer to the chunk than my address, then simply store it and return
 	if dcmp, _ := swarm.DistanceCmp(chunk.Address().Bytes(), p.Address.Bytes(), ps.address.Bytes()); dcmp == 1 {
 		_, err = ps.storer.Put(ctx, storage.ModePutSync, chunk)
 		if err != nil {
 			return fmt.Errorf("chunk store: %w", err)
 		}
-		return nil
+		return ps.accounting.Debit(p.Address, ps.pricer.Price(chunk.Address()))
 	}
 
 	span, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-handler", ps.logger, opentracing.Tag{Key: "address", Value: chunk.Address().String()})
@@ -145,15 +145,49 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 
 			// push the chunk to the closest peers in parallel for replication
 			// any errors here should NOT impact the rest of the handler
-			skipPeers := []swarm.Address{ps.address}
+			var skipPeers []swarm.Address
 			for i := 0; i < nPeersToPushsync; i++ {
-				peer, err := ps.closestPeer(chunk.Address(), skipPeers)
+				peer, err := ps.closestPeer(chunk.Address(), skipPeers, true)
 				if err != nil {
-					// TODO: log error
-					continue
+					ps.logger.Tracef("closest peer: %w", err)
+					break
 				}
 				skipPeers = append(skipPeers, peer)
-				go ps.pushToPeer(ctx, chunk, peer)
+				go func(peer swarm.Address) {
+					receiptPrice := ps.pricer.PeerPrice(peer, chunk.Address())
+					if err := ps.accounting.Reserve(ctx, peer, receiptPrice); err != nil {
+						ps.logger.Tracef("reserve balance for peer %s: %w", peer.String(), err)
+						return
+					}
+					defer ps.accounting.Release(peer, receiptPrice)
+
+					streamer, err := ps.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
+					if err != nil {
+						ps.logger.Tracef("new stream for peer %s: %w", peer.String(), err)
+						return
+					}
+
+					w := protobuf.NewWriter(streamer)
+					ctx, cancel := context.WithTimeout(ctx, timeToWaitForPushsyncToNeighbor)
+					defer cancel()
+
+					err = w.WriteMsgWithContext(ctx, &pb.Delivery{
+						Address: chunk.Address().Bytes(),
+						Data:    chunk.Data(),
+					})
+					if err != nil {
+						_ = streamer.Reset()
+						ps.logger.Tracef("chunk %s deliver to peer %s: %w", chunk.Address().String(), peer.String(), err)
+						return
+					}
+
+					err = ps.accounting.Credit(peer, receiptPrice)
+					if err != nil {
+						ps.logger.Tracef("credit peer %w", err)
+						return
+					}
+
+				}(peer)
 			}
 
 			// return back receipt
@@ -224,7 +258,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 		})
 
 		// find the next closest peer
-		peer, err := ps.closestPeer(ch.Address(), skipPeers)
+		peer, err := ps.closestPeer(ch.Address(), skipPeers, false)
 		if err != nil {
 			// ClosestPeer can return ErrNotFound in case we are not connected to any peers
 			// in which case we should return immediately.
@@ -310,7 +344,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 // closestPeer returns address of the peer that is closest to the chunk with
 // provided address addr. This function will ignore peers with addresses
 // provided in skipPeers
-func (ps *PushSync) closestPeer(addr swarm.Address, skipPeers []swarm.Address) (swarm.Address, error) {
+func (ps *PushSync) closestPeer(addr swarm.Address, skipPeers []swarm.Address, allowUpstream bool) (swarm.Address, error) {
 	closest := swarm.Address{}
 	err := ps.peerSuggester.EachPeer(func(peer swarm.Address, po uint8) (bool, bool, error) {
 		for _, a := range skipPeers {
@@ -340,34 +374,18 @@ func (ps *PushSync) closestPeer(addr swarm.Address, skipPeers []swarm.Address) (
 		return swarm.Address{}, topology.ErrNotFound
 	}
 
-	dcmp, err := swarm.DistanceCmp(addr.Bytes(), closest.Bytes(), ps.address.Bytes())
+	if allowUpstream {
+		return closest, nil
+	}
+
+	dcmp, err := swarm.DistanceCmp(addr.Bytes(), ps.address.Bytes(), closest.Bytes())
 	if err != nil {
 		return swarm.Address{}, fmt.Errorf("distance compare addr %s closest %s base address %s: %w", addr.String(), closest.String(), ps.address.String(), err)
 	}
 
-	if dcmp == 0 {
+	if dcmp == 1 {
 		return closest, topology.ErrWantSelf
 	}
 
 	return closest, nil
-}
-
-func (ps *PushSync) pushToPeer(ctx context.Context, ch swarm.Chunk, peer swarm.Address) {
-
-	streamer, err := ps.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
-	// TODO: log error
-	if err != nil {
-		return
-	}
-
-	w := protobuf.NewWriter(streamer)
-	ctx, cancel := context.WithTimeout(ctx, timeToWaitForPushsyncToNeighbor)
-	defer cancel()
-	if err := w.WriteMsgWithContext(ctx, &pb.Delivery{
-		Address: ch.Address().Bytes(),
-		Data:    ch.Data(),
-	}); err != nil {
-		_ = streamer.Reset()
-		// TODO: log error
-	}
 }
