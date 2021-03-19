@@ -32,9 +32,9 @@ import (
 )
 
 var (
-	openFileLimit      = 128 // The limit for LevelDB OpenFilesCacheCapacity.
-	blockCacheCapacity = 32 * 1024 * 1024
-	writeBuffer        = 32 * 1024 * 1024
+	openFileLimit      = 7500 // The limit for LevelDB OpenFilesCacheCapacity.
+	blockCacheCapacity = 256 * 1024 * 1024
+	writeBuffer        = 256 * 1024 * 1024
 )
 
 // DB provides abstractions over LevelDB in order to

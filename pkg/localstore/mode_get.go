@@ -123,7 +123,11 @@ func (db *DB) updateGCItems(items ...shed.Item) {
 // only Address and Data fields with non zero values,
 // which is ensured by the get function.
 func (db *DB) updateGC(item shed.Item) (err error) {
+	startLock := time.Now()
+	db.metrics.BatchLockHitGet.Inc()
 	db.batchMu.Lock()
+	totalTimeMetric(db.metrics.BatchLockWaitTimeGet, startLock)
+	defer totalTimeMetric(db.metrics.BatchLockHeldTimeGet, time.Now())
 	defer db.batchMu.Unlock()
 
 	batch := new(leveldb.Batch)

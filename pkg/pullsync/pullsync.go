@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"time"
 
@@ -60,6 +61,7 @@ type Interface interface {
 }
 
 type Syncer struct {
+	base swarm.Address         // this node's overlay address
 	streamer p2p.Streamer
 	metrics  metrics
 	logger   logging.Logger
@@ -71,20 +73,40 @@ type Syncer struct {
 	ruidMtx sync.Mutex
 	ruidCtx map[uint32]func()
 
+	pullMtx sync.Mutex
+	pullSem map[string]semChannel
+	pullCount map[string]int
+
+	syncMtx sync.Mutex
+	syncSem map[string]semChannel
+	//syncCount map[string]int
+	
+	syncIntervalThrottle semChannel
+	handlerThrottle semChannel
+
 	Interface
 	io.Closer
 }
 
-func New(streamer p2p.Streamer, storage pullstorage.Storer, unwrap func(swarm.Chunk), logger logging.Logger) *Syncer {
+type semChannel chan struct {}
+
+func New(base swarm.Address, streamer p2p.Streamer, storage pullstorage.Storer, unwrap func(swarm.Chunk), logger logging.Logger) *Syncer {
 	return &Syncer{
+		base:     base,
 		streamer: streamer,
 		storage:  storage,
 		metrics:  newMetrics(),
 		unwrap:   unwrap,
 		logger:   logger,
 		ruidCtx:  make(map[uint32]func()),
+		pullCount: make(map[string]int),
+		pullSem:  make(map[string]semChannel),
+		syncSem:  make(map[string]semChannel),
 		wg:       sync.WaitGroup{},
 		quit:     make(chan struct{}),
+		
+		syncIntervalThrottle: make(chan struct{}, 1),
+		handlerThrottle: make(chan struct{}, 1),
 	}
 }
 
@@ -114,6 +136,34 @@ func (s *Syncer) Protocol() p2p.ProtocolSpec {
 // If the requested interval is too large, the downstream peer has the liberty to
 // provide less chunks than requested.
 func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64) (topmost uint64, ruid uint32, err error) {
+
+	s.metrics.SyncConcurrency1.Inc()
+	defer s.metrics.SyncConcurrency1.Dec()
+
+	s.syncMtx.Lock()
+	semSync, ok := s.syncSem[peer.String()]
+	if !ok {
+		s.syncSem[peer.String()] = make(chan struct{}, 1)
+		semSync, ok = s.syncSem[peer.String()]
+	}
+	//s.syncCount[peer.String()] = s.syncCount[peer.String()] + 1
+	s.syncMtx.Unlock()
+	
+	
+	if (to != math.MaxUint64) {	// Live syncs don't queue
+		semSync <- struct{}{}
+		defer func() { <-semSync }()
+	}
+	
+	//s.syncMtx.Lock()
+	//s.syncCount[peer.String()] = s.syncCount[peer.String()] - 1
+	//startCount := s.syncCount[peer.String()]
+	//s.syncMtx.Unlock()
+	
+	//lockDelta := time.Now().Sub(lockTime).String()
+	s.metrics.SyncConcurrency2.Inc()
+	defer s.metrics.SyncConcurrency2.Dec()
+	
 	stream, err := s.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
 	if err != nil {
 		return 0, 0, fmt.Errorf("new stream: %w", err)
@@ -137,19 +187,23 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 
 	w, r := protobuf.NewWriterAndReader(stream)
 
+s.logger.Tracef("pullsync:SyncInterval:writeRuid Ruid:%d bin:%d %d-%d for %s", int(ru.Ruid), int(bin), from, to, peer.String())
 	if err = w.WriteMsgWithContext(ctx, &ru); err != nil {
 		return 0, 0, fmt.Errorf("write ruid: %w", err)
 	}
 
+s.logger.Tracef("pullsync:SyncInterval:writeRange Ruid:%d bin:%d %d-%d for %s", int(ru.Ruid), int(bin), from, to, peer.String())
 	rangeMsg := &pb.GetRange{Bin: int32(bin), From: from, To: to}
 	if err = w.WriteMsgWithContext(ctx, rangeMsg); err != nil {
 		return 0, ru.Ruid, fmt.Errorf("write get range: %w", err)
 	}
 
+s.logger.Tracef("pullsync:SyncInterval:readOffer Ruid:%d bin:%d %d-%d for %s", int(ru.Ruid), int(bin), from, to, peer.String())
 	var offer pb.Offer
 	if err = r.ReadMsgWithContext(ctx, &offer); err != nil {
 		return 0, ru.Ruid, fmt.Errorf("read offer: %w", err)
 	}
+s.logger.Tracef("pullsync:SyncInterval:Offer got %d Ruid:%d bin:%d %d-%d for %s", len(offer.Hashes)/swarm.HashSize, int(ru.Ruid), int(bin), from, to, peer.String())
 
 	if len(offer.Hashes)%swarm.HashSize != 0 {
 		return 0, ru.Ruid, fmt.Errorf("inconsistent hash length")
@@ -158,8 +212,17 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 	// empty interval (no chunks present in interval).
 	// return the end of the requested range as topmost.
 	if len(offer.Hashes) == 0 {
+s.logger.Tracef("pullsync:SyncInterval:ZEROOffer Ruid:%d bin:%d %d-%d for %s", int(ru.Ruid), int(bin), from, to, peer.String())
 		return offer.Topmost, ru.Ruid, nil
 	}
+
+	if (to != math.MaxUint64) {	// Live syncs don't throttle
+		s.syncIntervalThrottle <- struct{}{}
+		defer func() { <-s.syncIntervalThrottle }()
+	}
+
+	s.metrics.SyncConcurrency3.Inc()
+	defer s.metrics.SyncConcurrency3.Dec()
 
 	var (
 		bvLen      = len(offer.Hashes) / swarm.HashSize
@@ -172,6 +235,9 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 		return 0, ru.Ruid, fmt.Errorf("new bitvector: %w", err)
 	}
 
+	myAddress := s.base
+	myAddressBytes := myAddress.Bytes()
+	peerBytes := peer.Bytes()
 	for i := 0; i < len(offer.Hashes); i += swarm.HashSize {
 		a := swarm.NewAddress(offer.Hashes[i : i+swarm.HashSize])
 		if a.Equal(swarm.ZeroAddress) {
@@ -180,11 +246,28 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 			return 0, ru.Ruid, fmt.Errorf("zero address on offer")
 		}
 		s.metrics.OfferCounter.Inc()
+
+		myProximity := swarm.ExtendedProximity(a.Bytes(), myAddressBytes)
+		peerProximity := swarm.ExtendedProximity(a.Bytes(), peerBytes)
+		var needProximity uint8
+		if myProximity >= peerProximity {
+			needProximity = uint8(4)	// If I'm closer than him
+		} else {
+			needProximity = uint8(6)	// Because it's really close to me
+		}
+		if myProximity < needProximity {
+//s.logger.Tracef("pullsync:SyncInterval:extended_proximity skipping %d < %d chunk %s me %s", int(myProximity), int(needProximity), a.String(), myAddress.String())
+			continue
+		}
+//s.logger.Tracef("pullsync:SyncInterval:extended_proximity wanting %d >= %d chunk %s me %s", int(myProximity), int(needProximity), a.String(), myAddress.String())
+
 		s.metrics.DbOpsCounter.Inc()
+	
 		have, err := s.storage.Has(ctx, a)
 		if err != nil {
 			return 0, ru.Ruid, fmt.Errorf("storage has: %w", err)
 		}
+
 		if !have {
 			wantChunks[a.String()] = struct{}{}
 			ctr++
@@ -193,6 +276,7 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 		}
 	}
 
+s.logger.Tracef("pullsync:SyncInterval:writeWant %d Ruid:%d bin:%d %d-%d for %s", len(wantChunks), int(ru.Ruid), int(bin), from, to, peer.String())
 	wantMsg := &pb.Want{BitVector: bv.Bytes()}
 	if err = w.WriteMsgWithContext(ctx, wantMsg); err != nil {
 		return 0, ru.Ruid, fmt.Errorf("write want: %w", err)
@@ -205,6 +289,9 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 	err = nil
 	var chunksToPut []swarm.Chunk
 
+if len(wantChunks) > 0 {
+s.logger.Tracef("pullsync:SyncInterval:read %d Deliveries Ruid:%d bin:%d %d-%d for %s", len(wantChunks), int(ru.Ruid), int(bin), from, to, peer.String())
+}
 	for ; ctr > 0; ctr-- {
 		var delivery pb.Delivery
 		if err = r.ReadMsgWithContext(ctx, &delivery); err != nil {
@@ -234,26 +321,41 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 		}
 		chunksToPut = append(chunksToPut, chunk)
 	}
+
+if len(chunksToPut) > 0 {
+s.logger.Tracef("pullsync:SyncInterval:put %d Chunks Ruid:%d bin:%d %d-%d for %s", len(chunksToPut), int(ru.Ruid), int(bin), from, to, peer.String())
+}
 	if len(chunksToPut) > 0 {
+		startDB := time.Now()
 		s.metrics.DbOpsCounter.Inc()
 		if ierr := s.storage.Put(ctx, storage.ModePutSync, chunksToPut...); ierr != nil {
 			if err != nil {
 				ierr = fmt.Errorf(", sync err: %w", err)
 			}
 			return 0, ru.Ruid, fmt.Errorf("delivery put: %w", ierr)
+		} else {
+			s.logger.Tracef("pullsync:SyncInterval %s to Put %d chunks", time.Since(startDB), len(chunksToPut))
 		}
 	}
+
 	// there might have been an error in the for loop above,
 	// return it if it indeed happened
 	if err != nil {
 		return 0, ru.Ruid, err
 	}
 
+s.logger.Tracef("pullsync:SyncInterval:DONE %d Chunks Ruid:%d bin:%d %d-%d for %s", len(chunksToPut), int(ru.Ruid), int(bin), from, to, peer.String())
 	return offer.Topmost, ru.Ruid, nil
 }
 
 // handler handles an incoming request to sync an interval
 func (s *Syncer) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
+
+	start := time.Now()
+	s.metrics.HandlerServiceCounter.Inc()
+	s.metrics.HandlerConcurrency1.Inc()
+	defer s.metrics.HandlerConcurrency1.Dec()
+
 	w, r := protobuf.NewWriterAndReader(stream)
 	defer func() {
 		if err != nil {
@@ -299,12 +401,48 @@ func (s *Syncer) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (er
 		return fmt.Errorf("read get range: %w", err)
 	}
 
+	lockTime := time.Now()
+	s.pullMtx.Lock()
+	semPull, ok := s.pullSem[p.Address.String()]
+	if !ok {
+		s.pullSem[p.Address.String()] = make(chan struct{}, 1)
+		semPull, ok = s.pullSem[p.Address.String()]
+	}
+	s.pullCount[p.Address.String()] = s.pullCount[p.Address.String()] + 1
+	s.pullMtx.Unlock()
+	
+	if (rn.To != math.MaxUint64) {	// Live syncs don't queue
+		semPull <- struct{}{}
+		defer func() { <-semPull }()
+	}
+	
+	s.pullMtx.Lock()
+	s.pullCount[p.Address.String()] = s.pullCount[p.Address.String()] - 1
+	startCount := s.pullCount[p.Address.String()]
+	s.pullMtx.Unlock()
+	
+	s.metrics.HandlerConcurrency2.Inc()
+	defer s.metrics.HandlerConcurrency2.Dec()
+	
+	lockDelta := time.Now().Sub(lockTime).String()
+
+s.logger.Tracef("SENT:pullsync-handler:makeOffer %s(w:%s) ruid:%d bin:%d %d-%d %s", time.Since(start), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, p.Address.String())
 	// make an offer to the upstream peer in return for the requested range
 	offer, _, err := s.makeOffer(ctx, rn)
 	if err != nil {
 		return fmt.Errorf("make offer: %w", err)
 	}
 
+	if (rn.To != math.MaxUint64) {	// Live syncs don't throttle
+		s.handlerThrottle <- struct{}{}
+		defer func() { <-s.handlerThrottle }()
+	}
+
+	s.metrics.HandlerConcurrency3.Inc()
+	defer s.metrics.HandlerConcurrency3.Dec()
+	actualStart := time.Now()
+
+s.logger.Tracef("SENT:pullsync-handler:write-offer %s(w:%s) ruid:%d bin:%d %d-%d (%d) to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
 	if err := w.WriteMsgWithContext(ctx, offer); err != nil {
 		return fmt.Errorf("write offer: %w", err)
 	}
@@ -312,25 +450,35 @@ func (s *Syncer) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (er
 	// we don't have any hashes to offer in this range (the
 	// interval is empty). nothing more to do
 	if len(offer.Hashes) == 0 {
+		s.logger.Tracef("SENT:pullsync-handler:offer %s(w:%s) ruid:%d bin:%d %d-%d ZERO to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, p.Address.String())
 		return nil
 	}
 
+s.logger.Tracef("SENT:pullsync-handler:readWant %s(w:%s) ruid:%d bin:%d %d-%d (%d) to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
 	var want pb.Want
 	if err := r.ReadMsgWithContext(ctx, &want); err != nil {
 		return fmt.Errorf("read want: %w", err)
 	}
 
+s.logger.Tracef("SENT:pullsync-handler:processWant %s(w:%s) ruid:%d bin:%d %d-%d ?/%d to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
 	chs, err := s.processWant(ctx, offer, &want)
 	if err != nil {
 		return fmt.Errorf("process want: %w", err)
 	}
 
+s.logger.Tracef("SENT:pullsync-handler:deliver %s(w:%s) ruid:%d bin:%d %d-%d %d/%d to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(chs), len(offer.Hashes)/swarm.HashSize, p.Address.String())
 	for _, v := range chs {
+		s.metrics.HandlerDeliveryCounter.Inc()
 		deliver := pb.Delivery{Address: v.Address().Bytes(), Data: v.Data()}
 		if err := w.WriteMsgWithContext(ctx, &deliver); err != nil {
 			return fmt.Errorf("write delivery: %w", err)
 		}
 	}
+	s.pullMtx.Lock()
+	endCount := s.pullCount[p.Address.String()]
+	s.pullMtx.Unlock()
+
+	s.logger.Tracef("SENT:pullsync-handler:delivered %s(w:%s %d->%d) ruid:%d bin:%d %d-%d %d/%d to %s", time.Since(actualStart), lockDelta, startCount, endCount, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(chs), len(offer.Hashes)/swarm.HashSize, p.Address.String())
 
 	time.Sleep(50 * time.Millisecond) // because of test, getting EOF w/o
 	return nil
@@ -347,6 +495,7 @@ func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange) (o *pb.Offer, ad
 	o.Hashes = make([]byte, 0)
 	for _, v := range chs {
 		o.Hashes = append(o.Hashes, v.Bytes()...)
+		s.metrics.HandlerOfferCounter.Inc()
 	}
 	return o, chs, nil
 }
@@ -365,9 +514,10 @@ func (s *Syncer) processWant(ctx context.Context, o *pb.Offer, w *pb.Want) ([]sw
 		if bv.Get(i / swarm.HashSize) {
 			a := swarm.NewAddress(o.Hashes[i : i+swarm.HashSize])
 			addrs = append(addrs, a)
+			s.metrics.HandlerWantCounter.Inc()
 		}
 	}
-	s.metrics.DbOpsCounter.Inc()
+	s.metrics.HandlerDbOpsCounter.Inc()
 	return s.storage.Get(ctx, storage.ModeGetSync, addrs...)
 }
 
@@ -416,7 +566,7 @@ func (s *Syncer) cursorHandler(ctx context.Context, p p2p.Peer, stream p2p.Strea
 	}
 
 	var ack pb.Ack
-	s.metrics.DbOpsCounter.Inc()
+	s.metrics.CursorDbOpsCounter.Inc()
 	ints, err := s.storage.Cursors(ctx)
 	if err != nil {
 		return err

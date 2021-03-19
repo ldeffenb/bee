@@ -25,7 +25,46 @@ type metrics struct {
 	TotalTimeSet                    prometheus.Counter
 	TotalTimeSubscribePullIteration prometheus.Counter
 	TotalTimeSubscribePushIteration prometheus.Counter
-
+	
+	TotalSyncRetrieve           prometheus.Counter
+	TotalSyncBinID              prometheus.Counter
+	TotalSyncRetrievalIndex     prometheus.Counter
+	TotalSyncPullIndex          prometheus.Counter
+	TotalSyncSetGC              prometheus.Counter
+	TotalTimeSyncRetrieve           prometheus.Counter
+	TotalTimeSyncBinID              prometheus.Counter
+	TotalTimeSyncRetrievalIndex     prometheus.Counter
+	TotalTimeSyncPullIndex          prometheus.Counter
+	TotalTimeSyncSetGC              prometheus.Counter
+	
+	TotalForwardExists			   prometheus.Counter
+	TotalForwardRePush			   prometheus.Counter
+	TotalForwardPendPush		   prometheus.Counter
+	TotalForwardSoonPush		   prometheus.Counter
+	TotalForwardRetrieve           prometheus.Counter
+	TotalForwardBinID              prometheus.Counter
+	TotalForwardRetrievalIndex     prometheus.Counter
+	TotalForwardPullIndex          prometheus.Counter
+	TotalForwardPushIndex              prometheus.Counter
+	TotalTimeForwardRetrieve           prometheus.Counter
+	TotalTimeForwardBinID              prometheus.Counter
+	TotalTimeForwardRetrievalIndex     prometheus.Counter
+	TotalTimeForwardPullIndex          prometheus.Counter
+	TotalTimeForwardPushIndex              prometheus.Counter
+	
+	BatchLockHitGC			prometheus.Counter
+	BatchLockWaitTimeGC 	prometheus.Counter
+	BatchLockHeldTimeGC 	prometheus.Counter
+	BatchLockHitGet			prometheus.Counter
+	BatchLockWaitTimeGet 	prometheus.Counter
+	BatchLockHeldTimeGet 	prometheus.Counter
+	BatchLockHitPut			prometheus.Counter
+	BatchLockWaitTimePut 	prometheus.Counter
+	BatchLockHeldTimePut 	prometheus.Counter
+	BatchLockHitSet			prometheus.Counter
+	BatchLockWaitTimeSet 	prometheus.Counter
+	BatchLockHeldTimeSet 	prometheus.Counter
+	
 	GCCounter                prometheus.Counter
 	GCErrorCounter           prometheus.Counter
 	GCCollectedCounter       prometheus.Counter
@@ -134,6 +173,238 @@ func newMetrics() metrics {
 			Name:      "subscribe_push_iteration_time",
 			Help:      "Total time taken to subscribe for push iteration.",
 		}),
+
+
+		
+		TotalSyncRetrieve: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_retrieve",
+			Help:      "Number of times retrievalDataIndex.Has is invoked.",
+		}),
+		TotalTimeSyncRetrieve: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_retrieve_time",
+			Help:      "Total time taken by retrievalDataIndex.Has",
+		}),
+		TotalSyncBinID: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_bin_id",
+			Help:      "Number of times incBinID is invoked.",
+		}),
+		TotalTimeSyncBinID: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_bin_id_time",
+			Help:      "Total time taken by incBinID",
+		}),
+		TotalSyncRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_retrieval_index",
+			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked.",
+		}),
+		TotalTimeSyncRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_retrieval_index_time",
+			Help:      "Total time taken by retrievalDataIndex.PutInBatch",
+		}),
+		TotalSyncPullIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_pull_index",
+			Help:      "Number of times pullIndex.PutInBatch is invoked.",
+		}),
+		TotalTimeSyncPullIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_pull_index_time",
+			Help:      "Total time taken by rpullIndex.PutInBatch",
+		}),
+		TotalSyncSetGC: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_set_gc",
+			Help:      "Number of times setGC is invoked.",
+		}),
+		TotalTimeSyncSetGC: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_set_gc_time",
+			Help:      "Total time taken by setGC",
+		}),
+
+
+
+
+		TotalForwardExists: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_exists",
+			Help:      "Number of items forwarded which already exist.",
+		}),
+		TotalForwardRePush: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_re_push",
+			Help:      "Number of existing items added back to pushIndex.",
+		}),
+		TotalForwardPendPush: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_pend_push",
+			Help:      "Number of existing items still in pushIndex.",
+		}),
+		TotalForwardSoonPush: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_soon_push",
+			Help:      "Number of existing items too new to re-pushIndex.",
+		}),
+		TotalForwardRetrieve: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_retrieve",
+			Help:      "Number of times retrievalDataIndex.Has is invoked.",
+		}),
+		TotalTimeForwardRetrieve: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_retrieve_time",
+			Help:      "Total time taken by retrievalDataIndex.Has",
+		}),
+		TotalForwardBinID: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_bin_id",
+			Help:      "Number of times incBinID is invoked.",
+		}),
+		TotalTimeForwardBinID: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_bin_id_time",
+			Help:      "Total time taken by incBinID",
+		}),
+		TotalForwardRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_retrieval_index",
+			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked.",
+		}),
+		TotalTimeForwardRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_retrieval_index_time",
+			Help:      "Total time taken by retrievalDataIndex.PutInBatch",
+		}),
+		TotalForwardPullIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_pull_index",
+			Help:      "Number of times pullIndex.PutInBatch is invoked.",
+		}),
+		TotalTimeForwardPullIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_pull_index_time",
+			Help:      "Total time taken by pullIndex.PutInBatch",
+		}),
+		TotalForwardPushIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_forward_push_index",
+			Help:      "Number of times pushIndex.PutInBatch is invoked.",
+		}),
+		TotalTimeForwardPushIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_sync_push_index_time",
+			Help:      "Total time taken by pushIndex.PutInBatch",
+		}),
+
+
+
+		
+		BatchLockHitGC: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_hit_gc",
+			Help:      "Number of gc batchMU locks.",
+		}),
+		BatchLockWaitTimeGC: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_wait_gc",
+			Help:      "Total time gc waited for batchMU lock",
+		}),
+		BatchLockHeldTimeGC: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_held_gc",
+			Help:      "Total time gc held batchMU lock",
+		}),
+
+		BatchLockHitGet: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_hit_get",
+			Help:      "Number of get batchMU locks.",
+		}),
+		BatchLockWaitTimeGet: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_wait_get",
+			Help:      "Total time get waited for batchMU lock",
+		}),
+		BatchLockHeldTimeGet: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_held_get",
+			Help:      "Total time get held batchMU lock",
+		}),
+
+		BatchLockHitPut: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_hit_put",
+			Help:      "Number of put batchMU locks.",
+		}),
+		BatchLockWaitTimePut: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_wait_put",
+			Help:      "Total time put waited for batchMU lock",
+		}),
+		BatchLockHeldTimePut: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_held_put",
+			Help:      "Total time put held batchMU lock",
+		}),
+
+		BatchLockHitSet: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_hit_set",
+			Help:      "Number of set batchMU locks.",
+		}),
+		BatchLockWaitTimeSet: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_wait_set",
+			Help:      "Total time set waited for batchMU lock",
+		}),
+		BatchLockHeldTimeSet: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "batch_lock_held_set",
+			Help:      "Total time set held batchMU lock",
+		}),
+		
+		
 		GCCounter: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,

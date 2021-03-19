@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -36,7 +37,7 @@ var (
 	errOverlayMismatch         = errors.New("overlay mismatch")
 	timeToRetry                = 60 * time.Second
 	shortRetry                 = 30 * time.Second
-	saturationPeers            = 4
+	saturationPeers            = 2
 	overSaturationPeers        = 16
 )
 
@@ -209,6 +210,9 @@ func (k *Kad) manage() {
 		start        time.Time
 	)
 
+	sourceRandom := rand.NewSource(time.Now().Unix())
+	dealRandom:= rand.New(sourceRandom) // initialize local pseudorandom generator 
+
 	defer k.wg.Done()
 	defer close(k.done)
 
@@ -342,7 +346,15 @@ func (k *Kad) manage() {
 				}
 			}
 
+
+			var deckOfPeers [][]swarm.Address
+
+			connectedPO := uint8(swarm.MaxPO*2);
 			err = k.knownPeers.EachBinRev(func(peer swarm.Address, po uint8) (bool, bool, error) {
+
+				if (connectedPO == po) {
+					return false, true, nil	// Already got a connection in this bin, skip to the next one
+				}
 
 				if k.connectedPeers.Exists(peer) {
 					return false, false, nil
@@ -355,27 +367,59 @@ func (k *Kad) manage() {
 				}
 				k.waitNextMu.Unlock()
 
-				currentDepth := k.NeighborhoodDepth()
 				if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); saturated {
 					return false, true, nil // bin is saturated, skip to next bin
 				}
 
+				for len(deckOfPeers) <= int(po) {
+					deckOfPeers = append(deckOfPeers, nil)
+				}
+				deckOfPeers[po] = append(deckOfPeers[po], peer)
+				// forloop below came out of here!
+				
+
+				select {
+				case <-k.quit:
+					return true, false, nil
+				default:
+				}
+				
+				// the bin could be saturated or not, so a decision cannot
+				// be made before checking the next peer, so we iterate to next
+				return false, false, nil
+			})
+
+
+			for po := 0; po < len(deckOfPeers); po++ {
+				k.logger.Tracef("kademlia:connect: bin %d has %d peers", int(po), len(deckOfPeers[po]))
+				for q := 0; q < len(deckOfPeers[po]); q++ {
+
+				peerIndex := dealRandom.Intn(len(deckOfPeers[po]))
+				peer := deckOfPeers[po][peerIndex]
+				
+				deckOfPeers[po][peerIndex] = deckOfPeers[po][len(deckOfPeers[po])-1] // Copy last element to peerIndex.
+				deckOfPeers[po][len(deckOfPeers[po])-1] = swarm.Address{}   // Erase last element (write zero value).
+				deckOfPeers[po] = deckOfPeers[po][:len(deckOfPeers[po])-1]   // Truncate slice
+
+				currentDepth := k.NeighborhoodDepth()
 				bzzAddr, err := k.addressBook.Get(peer)
 				if err != nil {
 					if err == addressbook.ErrNotFound {
 						k.logger.Debugf("failed to get address book entry for peer: %s", peer.String())
 						peerToRemove = peer
-						return false, false, errMissingAddressBookEntry
+						//return false, false, errMissingAddressBookEntry
+						continue
 					}
 					// either a peer is not known in the address book, in which case it
 					// should be removed, or that some severe I/O problem is at hand
-					return false, false, err
+					//return false, false, err
+					continue
 				}
 
-				err = k.connect(ctx, peer, bzzAddr.Underlay, po)
+				err = k.connect(ctx, peer, bzzAddr.Underlay, uint8(po))
 				if err != nil {
 					if errors.Is(err, errOverlayMismatch) {
-						k.knownPeers.Remove(peer, po)
+						k.knownPeers.Remove(peer, uint8(po))
 						if err := k.addressBook.Remove(peer); err != nil {
 							k.logger.Debugf("could not remove peer from addressbook: %s", peer.String())
 						}
@@ -383,34 +427,35 @@ func (k *Kad) manage() {
 					k.logger.Debugf("peer not reachable from kademlia %s: %v", bzzAddr.String(), err)
 					k.logger.Warningf("peer not reachable when attempting to connect")
 					// continue to next
-					return false, false, nil
+					//return false, false, nil
+					continue
 				}
 
 				k.waitNextMu.Lock()
 				k.waitNext[peer.String()] = retryInfo{tryAfter: time.Now().Add(shortRetry)}
 				k.waitNextMu.Unlock()
 
-				k.connectedPeers.Add(peer, po)
+				k.connectedPeers.Add(peer, uint8(po))
 
 				k.depthMu.Lock()
 				k.depth = recalcDepth(k.connectedPeers)
 				k.depthMu.Unlock()
 
-				k.logger.Debugf("connected to peer: %s old depth: %d new depth: %d", peer, currentDepth, k.NeighborhoodDepth())
-
+				k.logger.Debugf("kademlia:connected to peer: %s old depth: %d new depth: %d", peer, currentDepth, k.NeighborhoodDepth())
+				
 				k.notifyPeerSig()
+				
+				// connectedPO = po	// Remember the bin we got a connection in to skip to the end of it
 
-				select {
-				case <-k.quit:
-					return true, false, nil
-				default:
+				break	// We connected to one in this bin, so go to the next bin
+
 				}
-
-				// the bin could be saturated or not, so a decision cannot
-				// be made before checking the next peer, so we iterate to next
-				return false, false, nil
-			})
+			}
 			k.logger.Tracef("kademlia iterator took %s to finish", time.Since(start))
+			saturationPeers += 2;
+			if saturationPeers > 16 {
+				saturationPeers = 16
+			}
 
 			if err != nil {
 				if errors.Is(err, errMissingAddressBookEntry) {

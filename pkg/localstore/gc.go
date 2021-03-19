@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ethersphere/bee/pkg/shed"
+	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -37,7 +38,7 @@ var (
 	gcTargetRatio = 0.9
 	// gcBatchSize limits the number of chunks in a single
 	// badger transaction on garbage collection.
-	gcBatchSize uint64 = 200
+	gcBatchSize uint64 = 100000
 )
 
 // collectGarbageWorker is a long running function that waits for
@@ -90,7 +91,11 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	target := db.gcTarget()
 
 	// protect database from changing idexes and gcSize
+	startLock := time.Now()
+	db.metrics.BatchLockHitGC.Inc()
 	db.batchMu.Lock()
+	totalTimeMetric(db.metrics.BatchLockWaitTimeGC, startLock)
+	defer totalTimeMetric(db.metrics.BatchLockHeldTimeGC, time.Now())
 	defer db.batchMu.Unlock()
 
 	// run through the recently pinned chunks and
@@ -107,35 +112,59 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	db.metrics.GCSize.Set(float64(gcSize))
 
 	done = true
+	iterations := 0
+	startTime := time.Now()
+	actualStart := time.Now()
+	iterateDelta := time.Duration(0)
 	err = db.gcIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+		if iterations == 0 {
+			actualStart = time.Now()
+			iterateDelta = time.Since(startTime)
+		}
+		//time1 := time.Since(startTime)
+		//localTime := time.Now()
+		iterations++
 		if gcSize-collectedCount <= target {
 			return true, nil
 		}
 
 		db.metrics.GCStoreTimeStamps.Set(float64(item.StoreTimestamp))
 		db.metrics.GCStoreAccessTimeStamps.Set(float64(item.AccessTimestamp))
+		//db.logger.Tracef("localstore:collect garbage:access timestamp %v store %v", time.Unix(item.AccessTimestamp/1000000000,item.AccessTimestamp%1000000000/1000), item.StoreTimestamp)
 
 		// delete from retrieve, pull, gc
 		err = db.retrievalDataIndex.DeleteInBatch(batch, item)
 		if err != nil {
 			return true, nil
 		}
+		//time2 := time.Since(localTime)
 		err = db.retrievalAccessIndex.DeleteInBatch(batch, item)
 		if err != nil {
 			return true, nil
 		}
+		//time3 := time.Since(localTime)
 		err = db.pullIndex.DeleteInBatch(batch, item)
 		if err != nil {
 			return true, nil
 		}
+		//time4 := time.Since(localTime)
 		err = db.gcIndex.DeleteInBatch(batch, item)
 		if err != nil {
 			return true, nil
 		}
+		//time5 := time.Since(localTime)
 		collectedCount++
 		if collectedCount >= gcBatchSize {
 			// bach size limit reached,
 			// another gc run is needed
+			db.logger.Tracef("localstore:collect garbage:batchSize after %s(+%s), did %d iterations through %v, collected %d, gcSize %d/%d", time.Since(actualStart), iterateDelta, iterations, time.Unix(item.AccessTimestamp/1000000000,item.AccessTimestamp%1000000000/1000), collectedCount, gcSize, target)
+			done = false
+			return true, nil
+		}
+		//db.logger.Tracef("localstore:collect garbage:pass %d iterate:%s retrievalDataIndex:%s retrievalAccessIndex:%s pullIndex:%s gcIndex:%s total %s",
+		//					iterations, time1, time2, time3, time4, time5, time.Since(startTime))
+		if time.Since(actualStart) > 5000*time.Millisecond {
+			db.logger.Tracef("localstore:collect garbage: timeout after %s(+%s), did %d iterations through %v, collected %d, gcSize %d/%d", time.Since(actualStart), iterateDelta, iterations, time.Unix(item.AccessTimestamp/1000000000,item.AccessTimestamp%1000000000/1000), collectedCount, gcSize, target)
 			done = false
 			return true, nil
 		}
@@ -146,6 +175,7 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	}
 	db.metrics.GCCollectedCounter.Inc()
 
+	startWrite := time.Now()
 	db.metrics.GCSize.Set(float64(gcSize-collectedCount))
 	db.gcSize.PutInBatch(batch, gcSize-collectedCount)
 	err = db.shed.WriteBatch(batch)
@@ -153,6 +183,7 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 		db.metrics.GCExcludeWriteBatchError.Inc()
 		return 0, false, err
 	}
+	db.logger.Tracef("localstore:collect garbage:Write %d iterations (%d collected) took %s", iterations, collectedCount, time.Since(startWrite))
 	return collectedCount, done, nil
 }
 
@@ -166,13 +197,28 @@ func (db *DB) removeChunksInExcludeIndexFromGC() (err error) {
 		}
 	}()
 
+	start := time.Now()
+	db.logger.Tracef("localstore:collect garbage:removeChunksInExcludeIndexFromGC: starting...")
 	batch := new(leveldb.Batch)
 	excludedCount := 0
 	var gcSizeChange int64
+
+	startTime := time.Now()
+	started := false
+	checked := 0
+	iterateDelta := time.Duration(0)
 	err = db.gcExcludeIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+		if (!started) {
+			started = true
+			iterateDelta = time.Since(startTime)
+		}
 		// Get access timestamp
 		retrievalAccessIndexItem, err := db.retrievalAccessIndex.Get(item)
 		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				db.logger.Tracef("localstore:collect garbage:removeChunksInExcludeIndexFromGC: Item %s not found in retrievalAccessIndex", swarm.NewAddress(item.Address).String())
+				err = db.gcExcludeIndex.DeleteInBatch(batch, item)
+			}
 			return false, err
 		}
 		item.AccessTimestamp = retrievalAccessIndexItem.AccessTimestamp
@@ -184,9 +230,16 @@ func (db *DB) removeChunksInExcludeIndexFromGC() (err error) {
 		}
 		item.BinID = retrievalDataIndexItem.BinID
 
+		checked++
+
 		// Check if this item is in gcIndex and remove it
 		ok, err := db.gcIndex.Has(item)
 		if err != nil {
+			excludedCount++
+			err = db.gcExcludeIndex.DeleteInBatch(batch, item)
+			if err != nil {
+				return false, nil
+			}
 			return false, nil
 		}
 		if ok {
@@ -202,13 +255,21 @@ func (db *DB) removeChunksInExcludeIndexFromGC() (err error) {
 			if err != nil {
 				return false, nil
 			}
+		} else {
+			excludedCount++
+			err = db.gcExcludeIndex.DeleteInBatch(batch, item)
+			if err != nil {
+				return false, nil
+			}
 		}
 
 		return false, nil
 	}, nil)
 	if err != nil {
+		db.logger.Tracef("localstore:collect garbage:removeChunksInExcludeIndexFromGC: %s(+%s) checked %d excluded %d gcSize %d err=%v", time.Since(start), iterateDelta, checked, excludedCount, gcSizeChange, err)
 		return err
 	}
+	db.logger.Tracef("localstore:collect garbage:removeChunksInExcludeIndexFromGC: %s(+%s) checked %d excluded %d gcSize %d done.", time.Since(start), iterateDelta, checked, excludedCount, gcSizeChange)
 
 	// update the gc size based on the no of entries deleted in gcIndex
 	err = db.incGCSizeInBatch(batch, gcSizeChange)
