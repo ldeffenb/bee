@@ -39,7 +39,7 @@ type Service struct {
 
 var (
 	retryInterval  = 5 * time.Second // time interval between retries
-	concurrentJobs = 10              // how many chunks to push simultaneously
+	concurrentJobs = 32              // how many chunks to push simultaneously
 )
 
 func New(storer storage.Storer, peerSuggester topology.ClosestPeerer, pushSyncer pushsync.PushSyncer, tagger *tags.Tags, logger logging.Logger, tracer *tracing.Tracer) *Service {
@@ -102,8 +102,6 @@ LOOP:
 
 			// postpone a retry only after we've finished processing everything in index
 			timer.Reset(retryInterval)
-			chunksInBatch++
-			s.metrics.TotalToPush.Inc()
 
 			select {
 			case sem <- struct{}{}:
@@ -127,7 +125,12 @@ LOOP:
 			inflight[ch.Address().String()] = struct{}{}
 			mtx.Unlock()
 
+			chunksInBatch++
+			s.metrics.TotalToPush.Inc()
+
 			go func(ctx context.Context, ch swarm.Chunk) {
+				s.metrics.PusherConcurrency.Inc()
+				defer s.metrics.PusherConcurrency.Dec()
 				var (
 					err       error
 					startTime = time.Now()
@@ -139,10 +142,11 @@ LOOP:
 						s.metrics.TotalSynced.Inc()
 						s.metrics.SyncTime.Observe(time.Since(startTime).Seconds())
 						// only print this if there was no error while sending the chunk
-						logger.Tracef("pusher pushed chunk %s", ch.Address().String())
+						logger.Debugf("pusher pushed chunk %s", ch.Address().String())
 					} else {
 						s.metrics.TotalErrors.Inc()
 						s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
+						logger.Debugf("pusher chunk %s err %v", ch.Address().String(), err)
 					}
 					mtx.Lock()
 					delete(inflight, ch.Address().String())
@@ -159,6 +163,7 @@ LOOP:
 						// the edge case is on the uploader node, in the case where the uploader node is
 						// connected to other nodes, but is the closest one to the chunk.
 						setSent = true
+						err = nil	// Not really an error!
 					} else {
 						return
 					}
@@ -182,6 +187,11 @@ LOOP:
 							return
 						}
 					}
+				} else {
+					if t == nil {
+						logger.Tracef("pusher tagless chunk %s err %w", ch.Address().String(), err)
+					}
+					err = nil	// Allow defer to TotalSynced.Inc() even if no tag
 				}
 			}(ctx, ch)
 		case <-timer.C:

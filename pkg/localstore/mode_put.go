@@ -19,6 +19,7 @@ package localstore
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/ethersphere/bee/pkg/shed"
@@ -53,8 +54,20 @@ func (db *DB) Put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 // in multiple put method calls.
 func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err error) {
 	// protect parallel updates
+	startLock := time.Now()
+	db.metrics.BatchLockHitPut.Inc()
 	db.batchMu.Lock()
+	totalTimeMetric(db.metrics.BatchLockWaitTimePut, startLock)
+	defer func(waitTime time.Duration, start time.Time) {
+		if len(chs) == 1 {
+			db.logger.Debugf("put(%s) %d chunks waited %s executed %s %s", mode.String(), len(chs), waitTime, time.Since(start), chs[0].Address().String())
+		} else {
+			db.logger.Debugf("put(%s) %d chunks waited %s executed %s", mode.String(), len(chs), waitTime, time.Since(start))
+		}
+	}(time.Since(startLock), time.Now())
+	defer totalTimeMetric(db.metrics.BatchLockHeldTimePut, time.Now())
 	defer db.batchMu.Unlock()
+	lockTime := time.Since(startLock)
 	if db.gcRunning {
 		for _, ch := range chs {
 			db.dirtyAddresses = append(db.dirtyAddresses, ch.Address())
@@ -102,6 +115,7 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 	case storage.ModePutUpload, storage.ModePutUploadPin:
 		for i, ch := range chs {
 			if containsChunk(ch.Address(), chs[:i]...) {
+				db.logger.Debugf("put(%s) DUPLICATE %s", mode.String(), ch.Address().String())
 				exist[i] = true
 				continue
 			}
@@ -115,6 +129,8 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 				// after the batch is successfully written
 				triggerPullFeed[db.po(ch.Address())] = struct{}{}
 				triggerPushFeed = true
+			} else {
+				db.logger.Debugf("put(%s) REDUNDANT %s", mode.String(), ch.Address().String())
 			}
 			gcSizeChange += c
 			if mode == storage.ModePutUploadPin {
@@ -125,9 +141,32 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 			}
 		}
 
+	case storage.ModePutForward:
+		for i, ch := range chs {
+			if containsChunk(ch.Address(), chs[:i]...) {
+				db.logger.Debugf("put(%s) DUPLICATE %s", mode.String(), ch.Address().String())
+				exist[i] = true
+				continue
+			}
+			exists, c, err := db.putForward(batch, binIDs, chunkToItem(ch), lockTime)
+			if err != nil {
+				return nil, err
+			}
+			exist[i] = exists
+			if !exists {
+				// chunk is new so, trigger push subscription feed
+				// after the batch is successfully written
+				triggerPushFeed = true
+			} else {
+				db.logger.Debugf("put(%s) REDUNDANT %s", mode.String(), ch.Address().String())
+			}
+			gcSizeChange += c
+		}
+
 	case storage.ModePutSync:
 		for i, ch := range chs {
 			if containsChunk(ch.Address(), chs[:i]...) {
+				db.logger.Debugf("put(%s) DUPLICATE %s", mode.String(), ch.Address().String())
 				exist[i] = true
 				continue
 			}
@@ -140,6 +179,8 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 				// chunk is new so, trigger pull subscription feed
 				// after the batch is successfully written
 				triggerPullFeed[db.po(ch.Address())] = struct{}{}
+			} else {
+				db.logger.Debugf("put(%s) REDUNDANT %s", mode.String(), ch.Address().String())
 			}
 			gcSizeChange += c
 		}
@@ -243,7 +284,13 @@ func (db *DB) putUpload(batch *leveldb.Batch, binIDs map[uint8]uint64, item shed
 // The batch can be written to the database.
 // Provided batch and binID map are updated.
 func (db *DB) putSync(batch *leveldb.Batch, binIDs map[uint8]uint64, item shed.Item) (exists bool, gcSizeChange int64, err error) {
+
+	start := time.Now()
+
+	start = time.Now()
+	db.metrics.TotalSyncRetrieve.Inc()
 	exists, err = db.retrievalDataIndex.Has(item)
+	totalTimeMetric(db.metrics.TotalTimeSyncRetrieve, start)
 	if err != nil {
 		return false, 0, err
 	}
@@ -252,19 +299,135 @@ func (db *DB) putSync(batch *leveldb.Batch, binIDs map[uint8]uint64, item shed.I
 	}
 
 	item.StoreTimestamp = now()
+	start = time.Now()
+	db.metrics.TotalSyncBinID.Inc()
 	item.BinID, err = db.incBinID(binIDs, db.po(swarm.NewAddress(item.Address)))
+	totalTimeMetric(db.metrics.TotalTimeSyncBinID, start)
 	if err != nil {
 		return false, 0, err
 	}
+
+	start = time.Now()
+	db.metrics.TotalSyncRetrievalIndex.Inc()
 	err = db.retrievalDataIndex.PutInBatch(batch, item)
+	totalTimeMetric(db.metrics.TotalTimeSyncRetrievalIndex, start)
 	if err != nil {
 		return false, 0, err
 	}
+
+	start = time.Now()
+	db.metrics.TotalSyncPullIndex.Inc()
 	err = db.pullIndex.PutInBatch(batch, item)
+	totalTimeMetric(db.metrics.TotalTimeSyncPullIndex, start)
 	if err != nil {
 		return false, 0, err
 	}
+
+	start = time.Now()
+	db.metrics.TotalSyncSetGC.Inc()
 	gcSizeChange, err = db.setGC(batch, item)
+	totalTimeMetric(db.metrics.TotalTimeSyncSetGC, start)
+	if err != nil {
+		return false, 0, err
+	}
+
+	return false, gcSizeChange, nil
+}
+
+// putSync adds an Item to the batch by updating required indexes:
+//  - put to indexes: retrieve, pull, push
+// The batch can be written to the database.
+// Provided batch and binID map are updated.
+func (db *DB) putForward(batch *leveldb.Batch, binIDs map[uint8]uint64, item shed.Item, lockTime time.Duration) (exists bool, gcSizeChange int64, err error) {
+
+	start := time.Now()
+
+	start = time.Now()
+	db.metrics.TotalForwardRetrieve.Inc()
+	exists, err = db.retrievalDataIndex.Has(item)
+	totalTimeMetric(db.metrics.TotalTimeForwardRetrieve, start)
+	if err != nil {
+		return false, 0, err
+	}
+	if exists {	// Even if it exists, ensure that it is in the pushIndex
+		db.metrics.TotalForwardExists.Inc()
+		i, err := db.retrievalDataIndex.Get(item)
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				db.logger.Warningf("put(Forward) UNKNOWN %s", swarm.NewAddress(item.Address).String())
+				return false, 0, nil
+			}
+			return false, 0, err
+		}
+		item.StoreTimestamp = i.StoreTimestamp
+		item.BinID = i.BinID
+		_, err = db.pushIndex.Get(item)
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				// we handle this error internally, since this is an internal inconsistency of the indices
+				// this error can happen if the chunk has already been pushed
+				// but this function is called with ModePutForward, so we'll forward it again if it has been long enough
+				var age int64
+				if item.AccessTimestamp != 0 {
+					age = (now()-item.AccessTimestamp)/1000000000	// Convert to seconds
+				} else {
+					age = (now()-item.StoreTimestamp)/1000000000	// Convert to seconds
+				}
+				if age > int64(math.Max(60.0,lockTime.Seconds()*2.0)) || age < 0 {	// Arbitrary age numbers
+					db.logger.Tracef("localstore:putForward: chunk with address %s stored %d not found in push index, re-inserting age %ds", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, age)
+					start = time.Now()
+					db.metrics.TotalForwardRePush.Inc()
+					db.metrics.TotalForwardPushIndex.Inc()
+					err = db.pushIndex.PutInBatch(batch, item)
+					totalTimeMetric(db.metrics.TotalTimeForwardPushIndex, start)
+					if err != nil {
+						return false, 0, err
+					}
+				} else {
+					db.metrics.TotalForwardSoonPush.Inc()
+					db.logger.Tracef("localstore:putForward: chunk with address %s stored %d not re-inserting age %ds", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, age)
+				}
+			} else {
+				return false, 0, err
+			}
+		} else {
+			db.metrics.TotalForwardPendPush.Inc()
+			db.logger.Tracef("localstore:putForward: chunk with address %s stored %d still in push index", swarm.NewAddress(item.Address).String(), item.StoreTimestamp)
+		}
+		return true, 0, nil
+	}
+
+	item.StoreTimestamp = now()
+
+	start = time.Now()
+	db.metrics.TotalForwardBinID.Inc()
+	item.BinID, err = db.incBinID(binIDs, db.po(swarm.NewAddress(item.Address)))
+	totalTimeMetric(db.metrics.TotalTimeForwardBinID, start)
+	if err != nil {
+		return false, 0, err
+	}
+
+	start = time.Now()
+	db.metrics.TotalForwardRetrievalIndex.Inc()
+	err = db.retrievalDataIndex.PutInBatch(batch, item)
+	totalTimeMetric(db.metrics.TotalTimeForwardRetrievalIndex, start)
+	if err != nil {
+		return false, 0, err
+	}
+
+	start = time.Now()
+	db.metrics.TotalForwardPullIndex.Inc()
+	err = db.pullIndex.PutInBatch(batch, item)
+	totalTimeMetric(db.metrics.TotalTimeForwardPullIndex, start)
+	if err != nil {
+		return false, 0, err
+	}
+
+	start = time.Now()
+	db.logger.Tracef("localstore:putForward: chunk with address %s stored %d added to push index", swarm.NewAddress(item.Address).String(), item.StoreTimestamp)
+	db.metrics.TotalForwardPushIndex.Inc()
+	err = db.pushIndex.PutInBatch(batch, item)
+	totalTimeMetric(db.metrics.TotalTimeForwardPushIndex, start)
 	if err != nil {
 		return false, 0, err
 	}

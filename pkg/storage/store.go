@@ -56,6 +56,8 @@ type ModePut int
 
 func (m ModePut) String() string {
 	switch m {
+	case ModePutForward:
+		return "Forward"
 	case ModePutRequest:
 		return "Request"
 	case ModePutSync:
@@ -81,6 +83,8 @@ const (
 	ModePutUploadPin
 	// ModePutRequestPin: the same as ModePutRequest but also pin the chunk with the put
 	ModePutRequestPin
+	// ModePutSync: when a chunk is received via syncing but needs to be forwarded to closest
+	ModePutForward
 )
 
 // ModeSet enumerates different Setter modes.

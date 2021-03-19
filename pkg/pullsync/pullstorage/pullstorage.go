@@ -70,6 +70,9 @@ func (s *ps) IntervalChunks(ctx context.Context, bin uint8, from, to uint64, lim
 
 	var nomore bool
 
+	//timer = time.NewTimer(batchTimeout)	// Ensure initial timeout with 0 returned
+	//timerC = timer.C
+
 LOOP:
 	for limit > 0 {
 		select {
