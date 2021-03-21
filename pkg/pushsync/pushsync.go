@@ -178,6 +178,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 			} else {
 				return fmt.Errorf("handler: push to closest: %w", err)
 			}
+			return fmt.Errorf("handler: push to closest: %w", err)
 		}
 		// pass back the received receipt in the previously received stream
 		ctx, cancel := context.WithTimeout(ctx, timeToWaitForReceipt)
