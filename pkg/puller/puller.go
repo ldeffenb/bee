@@ -321,6 +321,9 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 		p.wg.Done()
 		p.metrics.HistWorkerDoneCounter.Inc()
 	}()
+	p.metrics.HistWorkerConcurrency.Inc()
+	defer p.metrics.HistWorkerConcurrency.Dec()
+
 	if logMore {
 		p.logger.Tracef("histSyncWorker starting, peer %s bin %d cursor %d", peer, bin, cur)
 	}
@@ -377,6 +380,8 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 
 func (p *Puller) liveSyncWorker(ctx context.Context, peer swarm.Address, bin uint8, cur uint64) {
 	defer p.wg.Done()
+	p.metrics.LiveWorkerConcurrency.Inc()
+	defer p.metrics.LiveWorkerConcurrency.Dec()
 	if logMore {
 		p.logger.Tracef("liveSyncWorker starting, peer %s bin %d cursor %d", peer, bin, cur)
 	}

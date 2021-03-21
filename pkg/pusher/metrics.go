@@ -16,6 +16,7 @@ type metrics struct {
 	MarkAndSweepTime prometheus.Histogram
 	SyncTime         prometheus.Histogram
 	ErrorTime        prometheus.Histogram
+	PusherConcurrency prometheus.Gauge // number of concurrent chunk pushers
 }
 
 func newMetrics() metrics {
@@ -60,6 +61,12 @@ func newMetrics() metrics {
 			Name:      "error_time",
 			Help:      "Histogram of time spent before giving up on syncing a chunk.",
 			Buckets:   []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 60},
+		}),
+		PusherConcurrency: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "concurrency",
+			Help:      "Current pusher concurrency",
 		}),
 	}
 }

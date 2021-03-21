@@ -13,8 +13,10 @@ type metrics struct {
 	HistWorkerIterCounter prometheus.Counter // counts the number of historical syncing iterations
 	HistWorkerDoneCounter prometheus.Counter // count number of finished historical syncing jobs
 	HistWorkerErrCounter  prometheus.Counter // count number of errors
+	HistWorkerConcurrency prometheus.Gauge // number of concurrent history workers
 	LiveWorkerIterCounter prometheus.Counter // counts the number of live syncing iterations
 	LiveWorkerErrCounter  prometheus.Counter // count number of errors
+	LiveWorkerConcurrency prometheus.Gauge // number of concurrent live workers
 }
 
 func newMetrics() metrics {
@@ -39,6 +41,12 @@ func newMetrics() metrics {
 			Name:      "hist_worker_errors",
 			Help:      "Total history worker errors.",
 		}),
+		HistWorkerConcurrency: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "hist_worker_concurrency",
+			Help:      "Current history workers",
+		}),
 		LiveWorkerIterCounter: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,
@@ -50,6 +58,12 @@ func newMetrics() metrics {
 			Subsystem: subsystem,
 			Name:      "live_worker_errors",
 			Help:      "Total live worker errors.",
+		}),
+		LiveWorkerConcurrency: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "live_worker_concurrency",
+			Help:      "Current live workers",
 		}),
 	}
 }
