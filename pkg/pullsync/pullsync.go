@@ -426,23 +426,23 @@ func (s *Syncer) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (er
 	
 	lockDelta := time.Now().Sub(lockTime).String()
 
-s.logger.Tracef("SENT:pullsync-handler:makeOffer %s(w:%s) ruid:%d bin:%d %d-%d %s", time.Since(start), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, p.Address.String())
-	// make an offer to the upstream peer in return for the requested range
-	offer, _, err := s.makeOffer(ctx, rn)
-	if err != nil {
-		return fmt.Errorf("make offer: %w", err)
-	}
-
 	if (rn.To != math.MaxUint64) {	// Live syncs don't throttle
 		s.handlerThrottle <- struct{}{}
 		defer func() { <-s.handlerThrottle }()
+	}
+
+s.logger.Tracef("SENT:pullsync-handler:makeOffer %s(w:%s) ruid:%d bin:%d %d-%d %s", time.Since(start), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, p.Address.String())
+	// make an offer to the upstream peer in return for the requested range
+	offer, _, err := s.makeOffer(ctx, rn, p.Address)
+	if err != nil {
+		return fmt.Errorf("make offer: %w", err)
 	}
 
 	s.metrics.HandlerConcurrency3.Inc()
 	defer s.metrics.HandlerConcurrency3.Dec()
 	actualStart := time.Now()
 
-s.logger.Tracef("SENT:pullsync-handler:write-offer %s(w:%s) ruid:%d bin:%d %d-%d (%d) to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
+s.logger.Tracef("SENT:pullsync-handler:write-offer %s(w:%s) ruid:%d bin:%d %d-%d (%d)->%d to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, offer.Topmost, p.Address.String())
 	if err := w.WriteMsgWithContext(ctx, offer); err != nil {
 		return fmt.Errorf("write offer: %w", err)
 	}
@@ -485,19 +485,51 @@ s.logger.Tracef("SENT:pullsync-handler:deliver %s(w:%s) ruid:%d bin:%d %d-%d %d/
 }
 
 // makeOffer tries to assemble an offer for a given requested interval.
-func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange) (o *pb.Offer, addrs []swarm.Address, err error) {
-	chs, top, err := s.storage.IntervalChunks(ctx, uint8(rn.Bin), rn.From, rn.To, maxPage)
-	if err != nil {
-		return o, nil, err
-	}
+func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange, peer swarm.Address) (o *pb.Offer, addrs []swarm.Address, err error) {
+
 	o = new(pb.Offer)
-	o.Topmost = top
 	o.Hashes = make([]byte, 0)
-	for _, v := range chs {
-		o.Hashes = append(o.Hashes, v.Bytes()...)
-		s.metrics.HandlerOfferCounter.Inc()
+	myAddress := s.base
+	myAddressBytes := myAddress.Bytes()
+	peerBytes := peer.Bytes()
+	
+	start := rn.From
+	rejects := 0
+
+	for start < rn.To && rejects < maxPage * 100 {
+		chs, top, err := s.storage.IntervalChunks(ctx, uint8(rn.Bin), start, rn.To, maxPage)
+		if err != nil {
+			return o, nil, err
+		}
+		o.Topmost = top
+		for _, v := range chs {
+
+			myProximity := swarm.ExtendedProximity(v.Bytes(), myAddressBytes)
+			peerProximity := swarm.ExtendedProximity(v.Bytes(), peerBytes)
+			var needProximity uint8
+			if myProximity <= peerProximity {
+				needProximity = uint8(4)	// He's closer or tied with me
+			} else {
+				needProximity = uint8(6)	// Because it's really close to him
+			}
+			if peerProximity < needProximity {
+//s.logger.Tracef("pullsync:makeOffer:extended_proximity %d skipping %d < %d chunk %s peer %s", int(myProximity), int(peerProximity), int(needProximity), v.String(), peer.String())
+				rejects++
+				continue
+			}
+//s.logger.Tracef("pullsync:makeOffer:extended_proximity %d wanting %d >= %d chunk %s peer %s", int(myProximity), int(peerProximity), int(needProximity), v.String(), peer.String())
+
+			o.Hashes = append(o.Hashes, v.Bytes()...)
+			s.metrics.HandlerOfferCounter.Inc()
+		}
+s.logger.Tracef("pullsync:makeOffer:bin %d %d-%d got (%d)->%d for %s", int(rn.Bin), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
+		if len(o.Hashes)/swarm.HashSize > 0 {
+			return o, chs, nil
+		}
+		start = top + 1		// just in case we need more
 	}
-	return o, chs, nil
+	return o, nil, nil
+	//return o, chs, nil
 }
 
 // processWant compares a received Want to a sent Offer and returns

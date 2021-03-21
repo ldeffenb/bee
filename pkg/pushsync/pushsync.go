@@ -63,6 +63,8 @@ type PushSync struct {
 	pushSem map[string]semChannel
 	pushCount map[string]int
 
+	pushMtx2 sync.Mutex
+	pushLast map[string]time.Time
 }
 
 var (
@@ -87,6 +89,7 @@ func New(streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer
 		tracer:        tracer,
 		pushCount: make(map[string]int),
 		pushSem:  make(map[string]semChannel),
+		pushLast:  make(map[string]time.Time),
 	}
 	return ps
 }
@@ -142,18 +145,34 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 
 	start := time.Now()
 	if (supportForward) {
-		go func(ctx context.Context, chunk swarm.Chunk) {
-			ps.metrics.DbConcurrency.Inc()
-			defer ps.metrics.DbConcurrency.Dec()
-			startDB := time.Now()
-			// store the chunk in the local store
-			_, err = ps.storer.Put(ctx, storage.ModePutForward, chunk)
-			if err != nil {
-				ps.logger.Errorf("chunk store: %w", err)
-			} else {
-				ps.logger.Tracef("pushsync: %s to PutForward chunk %s", time.Since(startDB), chunk.Address().String())
+		tooSoon := false
+		ps.pushMtx2.Lock()
+		timeLast, ok := ps.pushLast[chunk.Address().String()]
+		if ok {
+			tooSoon = time.Since(timeLast) < time.Duration(5)*time.Minute
+			if !tooSoon {
+				ps.logger.Tracef("pushsync: tooSoon allowing %s chunk %s", time.Since(ps.pushLast[chunk.Address().String()]), chunk.Address().String())
 			}
-		}(ctx, chunk)
+		}
+		if (!tooSoon) {
+			ps.pushLast[chunk.Address().String()] = time.Now()
+		}
+		ps.pushMtx2.Unlock()
+
+		if (!tooSoon) {
+			go func(ctx context.Context, chunk swarm.Chunk) {
+				ps.metrics.DbConcurrency.Inc()
+				defer ps.metrics.DbConcurrency.Dec()
+				startDB := time.Now()
+				// store the chunk in the local store
+				_, err = ps.storer.Put(ctx, storage.ModePutForward, chunk)
+				if err != nil {
+					ps.logger.Errorf("chunk store: %w", err)
+				} else {
+					ps.logger.Tracef("pushsync: %s to PutForward chunk %s", time.Since(startDB), chunk.Address().String())
+				}
+			}(ctx, chunk)
+		}
 		receipt := pb.Receipt{Address: chunk.Address().Bytes()}
 		if err := w.WriteMsg(&receipt); err != nil {
 			return fmt.Errorf("%s SELF send receipt to peer %s: %w", time.Since(start), p.Address.String(), err)
