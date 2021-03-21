@@ -160,6 +160,11 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 			done = false
 			return true, nil
 		}
+		if time.Since(actualStart) > 5000*time.Millisecond {
+			db.logger.Tracef("localstore:collect garbage: timeout after %s(+%s), did %d iterations through %v, collected %d, gcSize %d/%d", time.Since(actualStart), iterateDelta, iterations, time.Unix(item.AccessTimestamp/1000000000,item.AccessTimestamp%1000000000/1000), collectedCount, gcSize, target)
+			done = false
+			return true, nil
+		}
 		return false, nil
 	}, nil)
 	if err != nil {
