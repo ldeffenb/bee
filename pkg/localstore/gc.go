@@ -92,8 +92,6 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	// tell the localstore to start logging dirty addresses
 	startLock := time.Now()
 	db.metrics.BatchLockHitGC.Inc()
-	startLock := time.Now()
-	db.metrics.BatchLockHitGC.Inc()
 	db.batchMu.Lock()
 	totalTimeMetric(db.metrics.BatchLockWaitTimeGC, startLock)
 	defer totalTimeMetric(db.metrics.BatchLockHeldTimeGC, time.Now())

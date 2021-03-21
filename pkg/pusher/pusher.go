@@ -39,7 +39,7 @@ type Service struct {
 
 var (
 	retryInterval  = 5 * time.Second // time interval between retries
-	concurrentJobs = 32              // how many chunks to push simultaneously
+	concurrentJobs = 128              // how many chunks to push simultaneously
 )
 
 func New(storer storage.Storer, peerSuggester topology.ClosestPeerer, pushSyncer pushsync.PushSyncer, tagger *tags.Tags, logger logging.Logger, tracer *tracing.Tracer) *Service {
@@ -93,6 +93,7 @@ LOOP:
 					dur = 500 * time.Millisecond
 				}
 				timer.Reset(dur)
+				s.logger.Tracef("pusher finished pushing %d chunks in batch", chunksInBatch)
 				break
 			}
 
@@ -202,6 +203,8 @@ LOOP:
 			if unsubscribe != nil {
 				unsubscribe()
 			}
+
+			s.logger.Tracef("pusher timer.C after %d chunks in batch", chunksInBatch)
 
 			chunksInBatch = 0
 

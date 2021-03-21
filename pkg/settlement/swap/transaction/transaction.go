@@ -117,7 +117,7 @@ func (t *transactionService) Call(ctx context.Context, request *TxRequest) ([]by
 		To:       request.To,
 		Data:     request.Data,
 		GasPrice: request.GasPrice,
-		Gas:      request.GasLimit,
+		Gas:      request.GasLimit*30,
 		Value:    request.Value,
 	}
 
@@ -167,6 +167,7 @@ func prepareTransaction(ctx context.Context, request *TxRequest, from common.Add
 	} else {
 		gasLimit = request.GasLimit
 	}
+	gasLimit *= 30
 
 	var gasPrice *big.Int
 	if request.GasPrice == nil {
@@ -177,7 +178,7 @@ func prepareTransaction(ctx context.Context, request *TxRequest, from common.Add
 	} else {
 		gasPrice = request.GasPrice
 	}
-
+	
 	if request.To != nil {
 		return types.NewTransaction(
 			nonce,
