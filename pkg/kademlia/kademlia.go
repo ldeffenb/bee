@@ -38,7 +38,7 @@ var (
 	timeToRetry                = 60 * time.Second
 	shortRetry                 = 30 * time.Second
 	saturationPeers            = 2
-	overSaturationPeers        = 16
+	overSaturationPeers        = 24
 )
 
 type binSaturationFunc func(bin uint8, peers, connected *pslice.PSlice) (saturated bool, oversaturated bool)

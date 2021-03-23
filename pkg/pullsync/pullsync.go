@@ -216,7 +216,8 @@ s.logger.Tracef("pullsync:SyncInterval:ZEROOffer Ruid:%d bin:%d %d-%d for %s", i
 		return offer.Topmost, ru.Ruid, nil
 	}
 
-	if (to != math.MaxUint64) {	// Live syncs don't throttle
+	//if (to != math.MaxUint64) {	// Live syncs don't throttle
+	{
 		s.syncIntervalThrottle <- struct{}{}
 		defer func() { <-s.syncIntervalThrottle }()
 	}
@@ -344,7 +345,7 @@ s.logger.Tracef("pullsync:SyncInterval:put %d Chunks Ruid:%d bin:%d %d-%d for %s
 		return 0, ru.Ruid, err
 	}
 
-s.logger.Tracef("pullsync:SyncInterval:DONE %d Chunks Ruid:%d bin:%d %d-%d for %s", len(chunksToPut), int(ru.Ruid), int(bin), from, to, peer.String())
+s.logger.Tracef("pullsync:SyncInterval:DONE %d/%d Chunks Ruid:%d bin:%d %d-%d for %s", len(chunksToPut), len(offer.Hashes)/swarm.HashSize, int(ru.Ruid), int(bin), from, to, peer.String())
 	return offer.Topmost, ru.Ruid, nil
 }
 
@@ -438,6 +439,11 @@ s.logger.Tracef("SENT:pullsync-handler:makeOffer %s(w:%s) ruid:%d bin:%d %d-%d %
 		return fmt.Errorf("make offer: %w", err)
 	}
 
+        if (rn.To == math.MaxUint64) {  // Live syncs throttle here
+                s.handlerThrottle <- struct{}{}
+                defer func() { <-s.handlerThrottle }()
+        }
+
 	s.metrics.HandlerConcurrency3.Inc()
 	defer s.metrics.HandlerConcurrency3.Dec()
 	actualStart := time.Now()
@@ -492,6 +498,7 @@ func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange, peer swarm.Addre
 	myAddress := s.base
 	myAddressBytes := myAddress.Bytes()
 	peerBytes := peer.Bytes()
+	sharedBits := swarm.ExtendedProximity(myAddressBytes, peerBytes)
 	
 	start := rn.From
 	rejects := 0
@@ -518,11 +525,16 @@ func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange, peer swarm.Addre
 				continue
 			}
 //s.logger.Tracef("pullsync:makeOffer:extended_proximity %d wanting %d >= %d chunk %s peer %s", int(myProximity), int(peerProximity), int(needProximity), v.String(), peer.String())
-
+//if int(needProximity) > int(sharedBits) {
+//	s.logger.Tracef("pullsync:makeOffer:OOPS:bin %d/%d/%d extended_proximity %d wanting %d >= %d chunk %s peer %s", int(rn.Bin), int(sharedBits), int(needProximity), int(myProximity), int(peerProximity), int(needProximity), v.String(), peer.String())
+//}
 			o.Hashes = append(o.Hashes, v.Bytes()...)
 			s.metrics.HandlerOfferCounter.Inc()
 		}
-s.logger.Tracef("pullsync:makeOffer:bin %d %d-%d got (%d)->%d for %s", int(rn.Bin), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
+s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
+//if len(o.Hashes)/swarm.HashSize > 0 && int(rn.Bin) > int(sharedBits) && int(rn.Bin) < 4 {
+//	s.logger.Tracef("pullsync:makeOffer:OOPS:bin %d/%d %d-%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
+//}
 		if len(o.Hashes)/swarm.HashSize > 0 {
 			return o, chs, nil
 		}

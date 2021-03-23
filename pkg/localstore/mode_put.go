@@ -383,6 +383,10 @@ func (db *DB) putForward(batch *leveldb.Batch, binIDs map[uint8]uint64, item she
 					if err != nil {
 						return false, 0, err
 					}
+					err = db.gcIndex.DeleteInBatch(batch, item)
+					if err != nil {
+						db.logger.Tracef("localstore:putForward: chunk with address %s stored %d not found in gc index, age %ds", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, age)
+					}
 				} else {
 					db.metrics.TotalForwardSoonPush.Inc()
 					db.logger.Tracef("localstore:putForward: chunk with address %s stored %d not re-inserting age %ds", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, age)

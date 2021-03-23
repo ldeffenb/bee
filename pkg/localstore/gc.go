@@ -160,11 +160,6 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 			done = false
 			return true, nil
 		}
-		if time.Since(actualStart) > 5000*time.Millisecond {
-			db.logger.Tracef("localstore:collect garbage: timeout after %s(+%s), did %d iterations through %v, collected %d, gcSize %d/%d", time.Since(actualStart), iterateDelta, iterations, time.Unix(item.AccessTimestamp/1000000000,item.AccessTimestamp%1000000000/1000), collectedCount, gcSize, target)
-			done = false
-			return true, nil
-		}
 		return false, nil
 	}, nil)
 	if err != nil {
@@ -186,6 +181,7 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	if err != nil {
 		return 0, false, err
 	}
+	db.metrics.GCSize.Set(float64(gcSize))
 
 	// get rid of dirty entries
 	for _, item := range candidates {
@@ -225,10 +221,9 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 
 	db.metrics.GCCommittedCounter.Add(float64(collectedCount))
 	db.gcSize.PutInBatch(batch, gcSize-collectedCount)
+	db.metrics.GCSize.Set(float64(gcSize-collectedCount))
 
 	startWrite := time.Now()
-	db.metrics.GCSize.Set(float64(gcSize-collectedCount))
-	db.gcSize.PutInBatch(batch, gcSize-collectedCount)
 	err = db.shed.WriteBatch(batch)
 	if err != nil {
 		db.metrics.GCErrorCounter.Inc()
