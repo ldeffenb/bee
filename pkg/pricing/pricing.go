@@ -6,6 +6,7 @@ package pricing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -23,6 +24,11 @@ const (
 	streamName      = "pricing"
 )
 
+var (
+	// ErrThresholdTooLow says that the proposed payment threshold is too low for even a single reserve.
+	ErrThresholdTooLow = errors.New("threshold too low")
+)
+	
 var _ Interface = (*Service)(nil)
 
 // Interface is the main interface of the pricing protocol
@@ -82,6 +88,12 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	}
 	paymentThreshold := big.NewInt(0).SetBytes(req.PaymentThreshold)
 	s.logger.Tracef("received payment threshold announcement from peer %v of %d", p.Address, paymentThreshold)
+	
+	neededThreshold := big.NewInt(0).Div(s.paymentThreshold,big.NewInt(2))
+	if paymentThreshold.Cmp(neededThreshold) < 0 {
+		s.logger.Tracef("payment threshold from peer %v of %d too small, need at least %d", p.Address, paymentThreshold, neededThreshold)
+		return p2p.NewBlockPeerError(1*time.Hour, ErrThresholdTooLow)
+	}
 
 	return s.paymentThresholdObserver.NotifyPaymentThreshold(p.Address, paymentThreshold)
 }
