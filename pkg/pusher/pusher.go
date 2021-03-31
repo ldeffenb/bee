@@ -35,6 +35,16 @@ type Service struct {
 	metrics           metrics
 	quit              chan struct{}
 	chunksWorkerQuitC chan struct{}
+
+	retryMtx sync.Mutex
+	retries map[string]Retry
+
+}
+
+type Retry struct {
+	count int
+	first time.Time
+	last time.Time
 }
 
 var (
@@ -52,6 +62,8 @@ func New(storer storage.Storer, peerSuggester topology.ClosestPeerer, pushSyncer
 		metrics:           newMetrics(),
 		quit:              make(chan struct{}),
 		chunksWorkerQuitC: make(chan struct{}),
+
+		retries:  make(map[string]Retry),
 	}
 	go service.chunksWorker()
 	return service
@@ -93,7 +105,7 @@ LOOP:
 					dur = 500 * time.Millisecond
 				}
 				timer.Reset(dur)
-				s.logger.Tracef("pusher finished pushing %d chunks in batch", chunksInBatch)
+				s.logger.Tracef("pusher finished pushing %d chunks in batch, %d inflight", chunksInBatch, len(inflight))
 				break
 			}
 
@@ -138,12 +150,21 @@ LOOP:
 					t         *tags.Tag
 					setSent   bool
 				)
+
+		s.retryMtx.Lock()
+		retry, ok := s.retries[ch.Address().String()]
+		if !ok {
+			retry = Retry{count: 0, first: time.Now(), last: time.Now() }
+			s.retries[ch.Address().String()] = retry
+		}
+		s.retryMtx.Unlock()
+
 				defer func() {
 					if err == nil {
 						s.metrics.TotalSynced.Inc()
 						s.metrics.SyncTime.Observe(time.Since(startTime).Seconds())
 						// only print this if there was no error while sending the chunk
-						logger.Debugf("pusher pushed chunk %s", ch.Address().String())
+						logger.Debugf("pusher pushed chunk %s in %d tries over %s", ch.Address().String(), retry.count, time.Since(retry.first))
 					} else {
 						s.metrics.TotalErrors.Inc()
 						s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
@@ -166,9 +187,39 @@ LOOP:
 						setSent = true
 						err = nil	// Not really an error!
 					} else {
-						return
+
+
+		s.retryMtx.Lock()
+//		var ok bool
+//		retry, ok = s.retries[ch.Address().String()]
+//		if !ok {
+//			retry = Retry{count: 0, first: time.Now(), last: time.Now() }
+//		}
+		if errors.Is(err, topology.ErrNotFound) {	// Reset the first time on startup errors
+			retry.first = time.Now()
+		} else {	// Otherwise, count the retry
+			retry.count++
+			retry.last = time.Now()
+		}
+		if retry.count < 5 || time.Since(retry.first) < time.Duration(5)*time.Minute {
+			s.retries[ch.Address().String()] = retry
+			s.retryMtx.Unlock()
+			logger.Debugf("pusher retried %d over %s pending chunk %s", retry.count, time.Since(retry.first), ch.Address().String())
+			return	// Keep trying this one
+		}
+		s.retries[ch.Address().String()] = retry
+		s.retryMtx.Unlock()
+		logger.Debugf("pusher retried %d over %s, keeping chunk %s", retry.count, time.Since(retry.first), ch.Address().String())
+
+
 					}
 				}
+
+		s.retryMtx.Lock()
+		delete(s.retries,ch.Address().String())
+		s.retryMtx.Unlock()
+
+
 				if err = s.storer.Set(ctx, storage.ModeSetSync, ch.Address()); err != nil {
 					err = fmt.Errorf("pusher: set sync: %w", err)
 					return
@@ -189,9 +240,9 @@ LOOP:
 						}
 					}
 				} else {
-					if t == nil {
-						logger.Tracef("pusher tagless chunk %s err %w", ch.Address().String(), err)
-					}
+					//if t == nil {
+					//	logger.Tracef("pusher tagless chunk %s err %w", ch.Address().String(), err)
+					//}
 					err = nil	// Allow defer to TotalSynced.Inc() even if no tag
 				}
 			}(ctx, ch)
@@ -204,7 +255,7 @@ LOOP:
 				unsubscribe()
 			}
 
-			s.logger.Tracef("pusher timer.C after %d chunks in batch", chunksInBatch)
+			s.logger.Tracef("pusher timer.C after %d chunks in batch, %d inflight", chunksInBatch, len(inflight))
 
 			chunksInBatch = 0
 
