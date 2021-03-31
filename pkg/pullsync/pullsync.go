@@ -82,7 +82,8 @@ type Syncer struct {
 	//syncCount map[string]int
 	
 	syncIntervalThrottle semChannel
-	handlerThrottle semChannel
+	offerThrottle semChannel
+	finalThrottle semChannel
 
 	Interface
 	io.Closer
@@ -106,7 +107,8 @@ func New(base swarm.Address, streamer p2p.Streamer, storage pullstorage.Storer, 
 		quit:     make(chan struct{}),
 		
 		syncIntervalThrottle: make(chan struct{}, 1),
-		handlerThrottle: make(chan struct{}, 1),
+		offerThrottle: make(chan struct{}, 1),
+		finalThrottle: make(chan struct{}, 1),
 	}
 }
 
@@ -428,21 +430,22 @@ func (s *Syncer) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (er
 	lockDelta := time.Now().Sub(lockTime).String()
 
 	if (rn.To != math.MaxUint64) {	// Live syncs don't throttle
-		s.handlerThrottle <- struct{}{}
-		defer func() { <-s.handlerThrottle }()
+		s.offerThrottle <- struct{}{}
 	}
 
 s.logger.Tracef("SENT:pullsync-handler:makeOffer %s(w:%s) ruid:%d bin:%d %d-%d %s", time.Since(start), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, p.Address.String())
 	// make an offer to the upstream peer in return for the requested range
 	offer, _, err := s.makeOffer(ctx, rn, p.Address)
 	if err != nil {
+		if (rn.To != math.MaxUint64) {	// Live syncs didn't throttle
+			<-s.offerThrottle
+		}
 		return fmt.Errorf("make offer: %w", err)
 	}
 
-        if (rn.To == math.MaxUint64) {  // Live syncs throttle here
-                s.handlerThrottle <- struct{}{}
-                defer func() { <-s.handlerThrottle }()
-        }
+	if (rn.To != math.MaxUint64) {	// Live syncs didn't throttle
+		<-s.offerThrottle
+	}
 
 	s.metrics.HandlerConcurrency3.Inc()
 	defer s.metrics.HandlerConcurrency3.Dec()
@@ -461,12 +464,22 @@ s.logger.Tracef("SENT:pullsync-handler:write-offer %s(w:%s) ruid:%d bin:%d %d-%d
 	}
 
 s.logger.Tracef("SENT:pullsync-handler:readWant %s(w:%s) ruid:%d bin:%d %d-%d (%d) to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
+wantStart := time.Now()
+
 	var want pb.Want
 	if err := r.ReadMsgWithContext(ctx, &want); err != nil {
 		return fmt.Errorf("read want: %w", err)
 	}
+if time.Since(wantStart) > time.Duration(3)*time.Second {
+	s.logger.Tracef("SENT:pullsync-handler:readWant LONG %s ruid:%d bin:%d %d-%d (%d) to %s", time.Since(wantStart), int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
+}
 
-s.logger.Tracef("SENT:pullsync-handler:processWant %s(w:%s) ruid:%d bin:%d %d-%d ?/%d to %s", time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
+	relockStart := time.Now()
+	s.finalThrottle <- struct{}{}	// Block final processing to one at a time for network bandwidth smoothing
+	defer func() { <-s.finalThrottle }()
+	finalStart := time.Now()
+	
+s.logger.Tracef("SENT:pullsync-handler:processWant relock:%s %s(w:%s) ruid:%d bin:%d %d-%d ?/%d to %s", time.Since(relockStart), time.Since(actualStart), lockDelta, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(offer.Hashes)/swarm.HashSize, p.Address.String())
 	chs, err := s.processWant(ctx, offer, &want)
 	if err != nil {
 		return fmt.Errorf("process want: %w", err)
@@ -484,7 +497,7 @@ s.logger.Tracef("SENT:pullsync-handler:deliver %s(w:%s) ruid:%d bin:%d %d-%d %d/
 	endCount := s.pullCount[p.Address.String()]
 	s.pullMtx.Unlock()
 
-	s.logger.Tracef("SENT:pullsync-handler:delivered %s(w:%s %d->%d) ruid:%d bin:%d %d-%d %d/%d to %s", time.Since(actualStart), lockDelta, startCount, endCount, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(chs), len(offer.Hashes)/swarm.HashSize, p.Address.String())
+	s.logger.Tracef("SENT:pullsync-handler:delivered final:%s %s(w:%s %d->%d) ruid:%d bin:%d %d-%d %d/%d to %s", time.Since(finalStart), time.Since(actualStart), lockDelta, startCount, endCount, int(ru.Ruid), rn.Bin, rn.From, rn.To, len(chs), len(offer.Hashes)/swarm.HashSize, p.Address.String())
 
 	time.Sleep(50 * time.Millisecond) // because of test, getting EOF w/o
 	return nil
@@ -500,8 +513,19 @@ func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange, peer swarm.Addre
 	peerBytes := peer.Bytes()
 	sharedBits := swarm.ExtendedProximity(myAddressBytes, peerBytes)
 	
+	if int(sharedBits) < 4 && int(rn.Bin) > 4 && rn.To != math.MaxUint64 {
+	        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d IMPOSSIBLE for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, peer.String())
+		o.Topmost = rn.To	// Nothing more to ask from here
+		return o, nil, nil
+	}
+	if rn.From == 0 && rn.To == 1 {
+        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d patch to avoid ZERO for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, peer.String())
+		rn.To = math.MaxUint64
+	}
 	start := rn.From
 	rejects := 0
+	startTime := time.Now()
+	maxDelay := time.Duration(1)*time.Minute
 
 	for start < rn.To && rejects < maxPage * 100 {
 		chs, top, err := s.storage.IntervalChunks(ctx, uint8(rn.Bin), start, rn.To, maxPage)
@@ -535,7 +559,11 @@ s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d got (%d)->%d for %s", int(rn
 //if len(o.Hashes)/swarm.HashSize > 0 && int(rn.Bin) > int(sharedBits) && int(rn.Bin) < 4 {
 //	s.logger.Tracef("pullsync:makeOffer:OOPS:bin %d/%d %d-%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
 //}
-		if len(o.Hashes)/swarm.HashSize > 0 {
+		if len(o.Hashes)/swarm.HashSize > 0 || time.Since(startTime) >= maxDelay  {
+if int(sharedBits) < 4 && int(rn.Bin) > 4 && len(o.Hashes)/swarm.HashSize > 0 {
+	s.logger.Tracef("pullsync:makeOffer:OOPS:bin %d/%d %d-%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
+}
+			
 			return o, chs, nil
 		}
 		start = top + 1		// just in case we need more
