@@ -80,6 +80,9 @@ type Kad struct {
 	quit              chan struct{}  // quit channel
 	done              chan struct{}  // signal that `manage` has quit
 	wg                sync.WaitGroup
+	
+	peersLoaded bool
+	peersDumped bool
 }
 
 type retryInfo struct {
@@ -232,18 +235,21 @@ func (k *Kad) manage() {
 		<-k.quit
 		cancel()
 	}()
+	
+	lastPassDone := time.Now()
 	for {
 		select {
 		case <-k.quit:
 			return
 		case <-time.After(30 * time.Second):
 			// periodically try to connect to new peers
+			k.logger.Tracef("kademlia timer kicking manageC")
 			select {
 			case k.manageC <- struct{}{}:
 			default:
 			}
 		case <-k.manageC:
-			start = time.Now()
+			k.logger.Tracef("kademlia manageC starting after %s idle", time.Since(lastPassDone))
 			select {
 			case <-k.quit:
 				return
@@ -253,6 +259,9 @@ func (k *Kad) manage() {
 				continue
 			}
 
+			start = time.Now()
+			attemptedCount := 0
+			connectedCount := 0
 			// attempt balanced connection first
 			err := func() error {
 				// for each bin
@@ -315,6 +324,7 @@ func (k *Kad) manage() {
 
 							po := swarm.Proximity(k.base.Bytes(), peer.Bytes())
 
+							attemptedCount++
 							err = k.connect(ctx, peer, bzzAddr.Underlay, po)
 							if err != nil {
 								if errors.Is(err, errOverlayMismatch) {
@@ -336,7 +346,7 @@ func (k *Kad) manage() {
 								// continue to next
 								continue
 							}
-
+							
 							k.waitNextMu.Lock()
 							k.waitNext[peer.String()] = retryInfo{tryAfter: time.Now().Add(shortRetry)}
 							k.waitNextMu.Unlock()
@@ -348,6 +358,7 @@ func (k *Kad) manage() {
 							k.depthMu.Unlock()
 
 							k.logger.Debugf("connected to peer: %s for bin: %d", peer, i)
+							connectedCount++
 
 							k.notifyPeerSig()
 						}
@@ -355,7 +366,7 @@ func (k *Kad) manage() {
 				}
 				return nil
 			}()
-			k.logger.Tracef("kademlia balanced connector took %s to finish", time.Since(start))
+			k.logger.Tracef("kademlia balanced connector took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
 
 			if err != nil {
 				if errors.Is(err, errMissingAddressBookEntry) {
@@ -369,8 +380,20 @@ func (k *Kad) manage() {
 
 			var deckOfPeers [][]swarm.Address
 
+			deckCount := 0
+			deckStart := time.Now()
 			connectedPO := uint8(swarm.MaxPO*2);
+			dumpPeers := k.peersLoaded && !k.peersDumped
+			if dumpPeers {
+				dumpPeers = false
+				k.peersDumped = true
+				k.logger.Tracef("kademlia:bin[] dumping peers")
+			}
 			err = k.knownPeers.EachBinRev(func(peer swarm.Address, po uint8) (bool, bool, error) {
+
+				if dumpPeers {
+					k.logger.Tracef("kademlia:bin[%d] peer %s", int(po), peer.String())
+				}
 
 				if (connectedPO == po) {
 					return false, true, nil	// Already got a connection in this bin, skip to the next one
@@ -386,7 +409,7 @@ func (k *Kad) manage() {
 					return false, false, nil
 				}
 				k.waitNextMu.Unlock()
-
+				
 				if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); saturated {
 					return false, true, nil // bin is saturated, skip to next bin
 				}
@@ -395,6 +418,7 @@ func (k *Kad) manage() {
 					deckOfPeers = append(deckOfPeers, nil)
 				}
 				deckOfPeers[po] = append(deckOfPeers[po], peer)
+				deckCount++
 				// forloop below came out of here!
 				
 
@@ -408,8 +432,14 @@ func (k *Kad) manage() {
 				// be made before checking the next peer, so we iterate to next
 				return false, false, nil
 			})
+			k.logger.Tracef("kademlia took %s to build deck of %d peers", time.Since(deckStart), deckCount)
+			if dumpPeers {
+				k.peersDumped = true
+				k.logger.Tracef("kademlia:bin[] peers dumped")
+			}
 
-
+			attemptedCount = 0
+			connectedCount = 0
 			for po := 0; po < len(deckOfPeers); po++ {
 				k.logger.Tracef("kademlia:connect: bin %d has %d peers", int(po), len(deckOfPeers[po]))
 				for q := 0; q < len(deckOfPeers[po]); q++ {
@@ -436,6 +466,7 @@ func (k *Kad) manage() {
 					continue
 				}
 
+				attemptedCount++
 				err = k.connect(ctx, peer, bzzAddr.Underlay, uint8(po))
 				if err != nil {
 					if errors.Is(err, errOverlayMismatch) {
@@ -470,6 +501,7 @@ func (k *Kad) manage() {
 				k.depthMu.Unlock()
 
 				k.logger.Debugf("kademlia:connected to peer: %s old depth: %d new depth: %d", peer, currentDepth, k.NeighborhoodDepth())
+				connectedCount++
 				
 				k.notifyPeerSig()
 				
@@ -479,12 +511,20 @@ func (k *Kad) manage() {
 
 				}
 			}
-			k.logger.Tracef("kademlia iterator took %s to finish", time.Since(start))
-			saturationPeers += 2;
-			if saturationPeers > 16 {
-				saturationPeers = 16
+			k.logger.Tracef("kademlia iterator took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
+			if connectedCount == 0 {
+				saturationPeers += 2;
+				if saturationPeers > 16 {
+					saturationPeers = 16
+				} else {
+					k.logger.Tracef("kademlia kicking manageC for boosted saturation=%d", saturationPeers)
+					select {
+					case k.manageC <- struct{}{}:
+					default:
+					}
+				}
 			}
-
+			
 			if err != nil {
 				if errors.Is(err, errMissingAddressBookEntry) {
 					po := swarm.Proximity(k.base.Bytes(), peerToRemove.Bytes())
@@ -499,6 +539,7 @@ func (k *Kad) manage() {
 				k.connectBootnodes(ctx)
 			}
 
+			lastPassDone = time.Now()
 		}
 	}
 }
@@ -715,6 +756,8 @@ func (k *Kad) announce(ctx context.Context, peer swarm.Address) error {
 // This does not guarantee that a connection will immediately
 // be made to the peer.
 func (k *Kad) AddPeers(ctx context.Context, addrs ...swarm.Address) error {
+	newCount := 0
+	kickManageC := false
 	for _, addr := range addrs {
 		if k.knownPeers.Exists(addr) {
 			continue
@@ -722,13 +765,35 @@ func (k *Kad) AddPeers(ctx context.Context, addrs ...swarm.Address) error {
 
 		po := swarm.Proximity(k.base.Bytes(), addr.Bytes())
 		k.knownPeers.Add(addr, po)
+		
+		if !kickManageC {
+			if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); !saturated {
+				kickManageC = true
+				k.logger.Tracef("kademlia kickable new bin %d %s", int(po), addr.String())
+			} else {
+				if len(addrs) < 100 {
+					k.logger.Tracef("kademlia SATURATED new bin %d %s", int(po), addr.String())
+				}
+			}
+		}
+		newCount++
+	}
+	
+	if len(addrs) > 10000 {
+		k.peersLoaded = true
+		k.logger.Tracef("kademlia:bin[] %d peers loaded", len(addrs))
 	}
 
-	select {
-	case k.manageC <- struct{}{}:
-	default:
+	if kickManageC {
+		k.logger.Tracef("kademlia kicking manageC for %d/%d new peers", newCount, len(addrs))
+		select {
+		case k.manageC <- struct{}{}:
+		default:
+		}
+	} else {
+		k.logger.Tracef("kademlia not kicking manageC for new peers of %d/%d", newCount, len(addrs))
 	}
-
+	
 	return nil
 }
 
@@ -758,9 +823,15 @@ func (k *Kad) Connected(ctx context.Context, peer p2p.Peer) error {
 		return err
 	}
 
-	select {
-	case k.manageC <- struct{}{}:
-	default:
+	po := swarm.Proximity(k.base.Bytes(), peer.Address.Bytes())
+	if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); !saturated {
+		k.logger.Tracef("kademlia kicking manageC for bin %d Connected %s", int(po), peer.Address.String())
+		select {
+		case k.manageC <- struct{}{}:
+		default:
+		}
+	} else {
+		k.logger.Tracef("kademlia NOT kicking manageC for Connected bin %d %s", int(po), peer.Address.String())
 	}
 
 	return nil
@@ -802,9 +873,14 @@ func (k *Kad) Disconnected(peer p2p.Peer) {
 	k.depth = recalcDepth(k.connectedPeers)
 	k.depthMu.Unlock()
 
-	select {
-	case k.manageC <- struct{}{}:
-	default:
+	if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); !saturated {
+		k.logger.Tracef("kademlia kicking manageC for Disconnected bin %d %s", int(po), peer.Address.String())
+		select {
+		case k.manageC <- struct{}{}:
+		default:
+		}
+	} else {
+		k.logger.Tracef("kademlia NOT kicking manageC for Disconnected bin %d %s", int(po), peer.Address.String())
 	}
 	k.notifyPeerSig()
 }
