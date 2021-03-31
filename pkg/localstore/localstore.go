@@ -226,6 +226,10 @@ func New(path string, baseKey []byte, o *Options, logger logging.Logger) (db *DB
 	if err != nil {
 		return nil, err
 	}
+	gcSize, err := db.gcSize.Get()
+	if err == nil {
+		db.metrics.GCSize.Set(float64(gcSize))
+	}
 
 	// Index storing actual chunk address, data and bin id.
 	db.retrievalDataIndex, err = db.shed.NewIndex("Address->StoreTimestamp|BinID|Data", shed.IndexFuncs{
