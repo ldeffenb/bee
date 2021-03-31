@@ -275,7 +275,9 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 		receiptPrice := ps.pricer.PeerPrice(peer, ch.Address())
 		err = ps.accounting.Reserve(ctx, peer, receiptPrice)
 		if err != nil {
-			return nil, fmt.Errorf("reserve balance for peer %s: %w", peer.String(), err)
+			logger.Debugf("[%d/%d] chunk %s failed to reserve %d for peer %s: %v", i+1, maxPeers, ch.Address().String(), receiptPrice, peer.String(), err)
+			err = fmt.Errorf("reserve balance %d for peer %s: %w", receiptPrice, peer.String(), err)
+			continue	// Try the next closest peer
 		}
 		deferFuncs = append(deferFuncs, func() { ps.accounting.Release(peer, receiptPrice) })
 
