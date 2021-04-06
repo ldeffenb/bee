@@ -41,6 +41,7 @@ var (
 	ErrUnsolicitedChunk = errors.New("peer sent unsolicited chunk")
 
 	cancellationTimeout = 5 * time.Second // explicit ruid cancellation message timeout
+	cursorTimeout = 60 * time.Second // fetch cursors timeout
 )
 
 // how many maximum chunks in a batch
@@ -52,7 +53,7 @@ type Interface interface {
 	// It returns the BinID of highest chunk that was synced from the given
 	// interval. If the requested interval is too large, the downstream peer
 	// has the liberty to provide less chunks than requested.
-	SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64) (topmost uint64, ruid uint32, err error)
+	SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64, depth uint8) (topmost uint64, ruid uint32, err error)
 	// GetCursors retrieves all cursors from a downstream peer.
 	GetCursors(ctx context.Context, peer swarm.Address) ([]uint64, error)
 	// CancelRuid cancels active pullsync operation identified by ruid on
@@ -137,7 +138,7 @@ func (s *Syncer) Protocol() p2p.ProtocolSpec {
 // It returns the BinID of highest chunk that was synced from the given interval.
 // If the requested interval is too large, the downstream peer has the liberty to
 // provide less chunks than requested.
-func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64) (topmost uint64, ruid uint32, err error) {
+func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64, depth uint8) (topmost uint64, ruid uint32, err error) {
 
 	s.metrics.SyncConcurrency1.Inc()
 	defer s.metrics.SyncConcurrency1.Dec()
@@ -257,6 +258,9 @@ s.logger.Tracef("pullsync:SyncInterval:ZEROOffer Ruid:%d bin:%d %d-%d for %s", i
 			needProximity = uint8(4)	// If I'm closer than him
 		} else {
 			needProximity = uint8(6)	// Because it's really close to me
+		}
+		if depth > 2 && depth-2 > needProximity {	// Get even more selective!
+			needProximity = depth - 2
 		}
 		if myProximity < needProximity {
 //s.logger.Tracef("pullsync:SyncInterval:extended_proximity skipping %d < %d chunk %s me %s", int(myProximity), int(needProximity), a.String(), myAddress.String())
@@ -607,13 +611,18 @@ func (s *Syncer) GetCursors(ctx context.Context, peer swarm.Address) (retr []uin
 	}()
 
 	w, r := protobuf.NewWriterAndReader(stream)
+	
+	
+	ctxTo, cancel := context.WithTimeout(ctx, cursorTimeout)
+	defer cancel()
+	
 	syn := &pb.Syn{}
-	if err = w.WriteMsgWithContext(ctx, syn); err != nil {
+	if err = w.WriteMsgWithContext(ctxTo, syn); err != nil {
 		return nil, fmt.Errorf("write syn: %w", err)
 	}
 
 	var ack pb.Ack
-	if err = r.ReadMsgWithContext(ctx, &ack); err != nil {
+	if err = r.ReadMsgWithContext(ctxTo, &ack); err != nil {
 		return nil, fmt.Errorf("read ack: %w", err)
 	}
 
