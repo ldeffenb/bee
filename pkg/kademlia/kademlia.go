@@ -37,7 +37,10 @@ var (
 	errOverlayMismatch         = errors.New("overlay mismatch")
 	timeToRetry                = 60 * time.Second
 	shortRetry                 = 30 * time.Second
-	saturationPeers            = 2
+	startingSaturationPeers	   = 2
+	incrementSaturationPeers   = 2
+	maxSaturationPeers		   = 16
+	saturationPeers            = startingSaturationPeers
 	overSaturationPeers        = 24
 )
 
@@ -262,6 +265,12 @@ func (k *Kad) manage() {
 			start = time.Now()
 			attemptedCount := 0
 			connectedCount := 0
+			
+			if k.connectedPeers.Length() == 0 {
+				saturationPeers = startingSaturationPeers
+				k.logger.Debugf("kademlia:Reset saturation to %d, %d peers connected", saturationPeers, k.connectedPeers.Length())
+			}
+
 			// attempt balanced connection first
 			err := func() error {
 				// for each bin
@@ -513,9 +522,9 @@ func (k *Kad) manage() {
 			}
 			k.logger.Tracef("kademlia iterator took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
 			if connectedCount == 0 {
-				saturationPeers += 2;
-				if saturationPeers > 16 {
-					saturationPeers = 16
+				saturationPeers += incrementSaturationPeers;
+				if saturationPeers > maxSaturationPeers {
+					saturationPeers = maxSaturationPeers
 				} else {
 					k.logger.Tracef("kademlia kicking manageC for boosted saturation=%d", saturationPeers)
 					select {
@@ -888,6 +897,8 @@ func (k *Kad) Disconnected(peer p2p.Peer) {
 func (k *Kad) notifyPeerSig() {
 	k.peerSigMtx.Lock()
 	defer k.peerSigMtx.Unlock()
+	
+	k.logger.Tracef("kademlia:notifyPeerSig")
 
 	for _, c := range k.peerSig {
 		// Every peerSig channel has a buffer capacity of 1,
