@@ -127,7 +127,9 @@ func (p *Puller) manage() {
 				peersDisconnected = make(map[string]peer)
 			)
 
+			p.logger.Debugf("puller scanning syncpeers depth %d", depth)
 			p.syncPeersMtx.Lock()
+			scanStartTime := time.Now()
 
 			// make a map of all peers we're syncing with, then remove from it
 			// the entries we get from kademlia  in the iterator, this way we
@@ -149,7 +151,30 @@ func (p *Puller) manage() {
 					delete(peersDisconnected, peerAddr.String())
 				}
 				syncing := len(bp)
-				if po < depth {
+
+				if po >= depth {
+					// within depth, sync everything >= depth
+					if _, ok := bp[peerAddr.String()]; !ok {
+						// we're not syncing with this peer yet, start doing so
+						bp[peerAddr.String()] = newSyncPeer(peerAddr, p.bins)
+						peerEntry := peer{addr: peerAddr, po: po}
+						peersToSync = append(peersToSync, peerEntry)
+						p.logger.Debugf("puller syncing peer %s po %d depth %d", peerAddr, po, depth)
+					} else {
+						// already syncing, recalc
+						peerEntry := peer{addr: peerAddr, po: po}
+						peersToRecalc = append(peersToRecalc, peerEntry)
+						p.logger.Debugf("puller recalcing peer %s po %d depth %d", peerAddr, po, depth)
+					}
+				} else {
+					if _, ok := bp[peerAddr.String()]; ok {	// Disconnect syncing peers no longer within depth
+						// already syncing, recalc
+						peerEntry := peer{addr: peerAddr, po: po}
+						peersDisconnected[peerAddr.String()] = peerEntry
+						p.logger.Debugf("puller cancelling peer %s po %d depth %d", peerAddr, po, depth)
+					}
+				}
+				if false && po < depth {	// Disable outside of depth pullsync to save network bandwidth
 					// outside of depth, sync peerPO bin only
 					if _, ok := bp[peerAddr.String()]; !ok {
 						if syncing < p.shallowBinPeers {
@@ -163,36 +188,31 @@ func (p *Puller) manage() {
 						peerEntry := peer{addr: peerAddr, po: po}
 						peersToRecalc = append(peersToRecalc, peerEntry)
 					}
-				} else {
-					// within depth, sync everything >= depth
-					if _, ok := bp[peerAddr.String()]; !ok {
-						// we're not syncing with this peer yet, start doing so
-						bp[peerAddr.String()] = newSyncPeer(peerAddr, p.bins)
-						peerEntry := peer{addr: peerAddr, po: po}
-						peersToSync = append(peersToSync, peerEntry)
-					} else {
-						// already syncing, recalc
-						peerEntry := peer{addr: peerAddr, po: po}
-						peersToRecalc = append(peersToRecalc, peerEntry)
-					}
 				}
 
 				return false, false, nil
 			})
 
+			p.logger.Debugf("puller syncing %d peers depth %d", len(peersToSync), depth)
 			for _, v := range peersToSync {
+				p.logger.Debugf("puller syncing peer %s po %d depth %d (now %d)", v.addr, v.po, depth, p.topology.NeighborhoodDepth())
 				p.syncPeer(ctx, v.addr, v.po, depth)
 			}
 
+			p.logger.Debugf("puller recalcing %d peers depth %d (now %d)", len(peersToRecalc), depth, p.topology.NeighborhoodDepth())
 			for _, v := range peersToRecalc {
+				p.logger.Debugf("puller recalcing peer %s po %d depth %d", v.addr, v.po, depth)
 				p.recalcPeer(ctx, v.addr, v.po, depth)
 			}
 
+			p.logger.Debugf("puller disconnecting %d peers depth %d (now %d)", len(peersDisconnected), depth, p.topology.NeighborhoodDepth())
 			for _, v := range peersDisconnected {
+				p.logger.Debugf("puller disconnected peer %s po %d depth %d", v.addr, v.po, depth)
 				p.disconnectPeer(ctx, v.addr, v.po)
 			}
 
 			p.syncPeersMtx.Unlock()
+			p.logger.Debugf("puller done scanning syncpeers depth %d (now %d) in %s sync %d recalc %d disconnect %d", depth, p.topology.NeighborhoodDepth(), time.Since(scanStartTime), len(peersToSync), len(peersToRecalc), len(peersDisconnected))
 
 		case <-p.quit:
 			return
@@ -201,7 +221,7 @@ func (p *Puller) manage() {
 }
 
 func (p *Puller) disconnectPeer(ctx context.Context, peer swarm.Address, po uint8) {
-	if logMore {
+	if true || logMore {
 		p.logger.Debugf("puller disconnect cleanup peer %s po %d", peer, po)
 	}
 	syncCtx := p.syncPeers[po][peer.String()] // disconnectPeer is called under lock, this is safe
@@ -244,40 +264,37 @@ func (p *Puller) recalcPeer(ctx context.Context, peer swarm.Address, po, d uint8
 		}
 		syncCtx.cancelBins(dontWant...)
 	} else {
-		// outside of depth
-		var (
-			want     = po
-			dontWant = []uint8{0} // never want bin 0
-		)
+
+		var dontWant []uint8
 
 		for i := uint8(0); i < p.bins; i++ {
-			if i == want {
-				continue
-			}
 			dontWant = append(dontWant, i)
 		}
 
-		if !syncCtx.isBinSyncing(want) {
-			p.syncPeerBin(ctx, syncCtx, peer, want, c[want])
-		}
 		syncCtx.cancelBins(dontWant...)
 	}
 }
 
 func (p *Puller) syncPeer(ctx context.Context, peer swarm.Address, po, d uint8) {
+
+	p.logger.Debugf("puller sync peer %s", peer.String())
+
 	syncCtx := p.syncPeers[po][peer.String()] // syncPeer is called under lock, so this is safe
 	syncCtx.Lock()
 	defer syncCtx.Unlock()
 
+	p.logger.Debugf("puller sync peer %s get cursors", peer.String())
 	p.cursorsMtx.Lock()
 	c, ok := p.cursors[peer.String()]
 	p.cursorsMtx.Unlock()
 
 	if !ok {
+		startTime := time.Now()
+		p.logger.Debugf("puller sync peer %s GET cursors", peer.String())
 		cursors, err := p.syncer.GetCursors(ctx, peer)
 		if err != nil {
-			if logMore {
-				p.logger.Debugf("could not get cursors from peer %s: %v", peer.String(), err)
+			if true || logMore {
+				p.logger.Debugf("puller could not get cursors from peer %s: %v", peer.String(), err)
 			}
 			delete(p.syncPeers[po], peer.String())
 			return
@@ -288,6 +305,7 @@ func (p *Puller) syncPeer(ctx context.Context, peer swarm.Address, po, d uint8) 
 		p.cursors[peer.String()] = cursors
 		p.cursorsMtx.Unlock()
 		c = cursors
+		p.logger.Debugf("puller sync peer %s took %s to GET cursors", peer.String(), time.Since(startTime))
 	}
 
 	// peer outside depth?
@@ -305,6 +323,9 @@ func (p *Puller) syncPeer(ctx context.Context, peer swarm.Address, po, d uint8) 
 }
 
 func (p *Puller) syncPeerBin(ctx context.Context, syncCtx *syncPeer, peer swarm.Address, bin uint8, cur uint64) {
+
+	p.logger.Debugf("puller syncPeerBin peer %s bin %d from %d", peer.String(), int(bin), cur)
+
 	binCtx, cancel := context.WithCancel(ctx)
 	syncCtx.setBinCancel(cancel, bin)
 	if cur > 0 {
@@ -355,7 +376,7 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 			}
 			return
 		}
-		top, ruid, err := p.syncer.SyncInterval(ctx, peer, bin, s, cur)
+		top, ruid, err := p.syncer.SyncInterval(ctx, peer, bin, s, cur, p.topology.NeighborhoodDepth())
 		if err != nil {
 			if logMore {
 				p.logger.Debugf("histSyncWorker error syncing interval. peer %s, bin %d, cursor %d, err %v", peer.String(), bin, cur, err)
@@ -401,7 +422,7 @@ func (p *Puller) liveSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 			return
 		default:
 		}
-		top, ruid, err := p.syncer.SyncInterval(ctx, peer, bin, from, math.MaxUint64)
+		top, ruid, err := p.syncer.SyncInterval(ctx, peer, bin, from, math.MaxUint64, p.topology.NeighborhoodDepth())
 		if err != nil {
 			if logMore {
 				p.logger.Debugf("liveSyncWorker exit on sync error. peer %s bin %d from %d err %v", peer, bin, from, err)
