@@ -50,6 +50,10 @@ type metrics struct {
 	TotalTimeForwardPullIndex          prometheus.Counter
 	TotalTimeForwardPushIndex              prometheus.Counter
 	
+	TotalRequestRetrievalIndex     prometheus.Counter
+	TotalUploadRetrievalIndex     prometheus.Counter
+
+	
 	BatchLockHitGC			prometheus.Counter
 	BatchLockWaitTimeGC 	prometheus.Counter
 	BatchLockHeldTimeGC 	prometheus.Counter
@@ -213,7 +217,7 @@ func newMetrics() metrics {
 			Namespace: m.Namespace,
 			Subsystem: subsystem,
 			Name:      "total_sync_retrieval_index",
-			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked.",
+			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked by sync.",
 		}),
 		TotalTimeSyncRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
@@ -301,7 +305,7 @@ func newMetrics() metrics {
 			Namespace: m.Namespace,
 			Subsystem: subsystem,
 			Name:      "total_forward_retrieval_index",
-			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked.",
+			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked by forward.",
 		}),
 		TotalTimeForwardRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
@@ -334,6 +338,18 @@ func newMetrics() metrics {
 			Help:      "Total time taken by pushIndex.PutInBatch",
 		}),
 
+		TotalRequestRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_request_retrieval_index",
+			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked by request.",
+		}),
+		TotalUploadRetrievalIndex: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "total_upload_retrieval_index",
+			Help:      "Number of times retrievalDataIndex.PutInBatch is invoked by upload.",
+		}),
 
 
 		

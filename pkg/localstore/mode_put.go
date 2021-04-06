@@ -237,6 +237,7 @@ func (db *DB) putRequest(batch *leveldb.Batch, binIDs map[uint8]uint64, item she
 		return false, 0, err
 	}
 
+	db.metrics.TotalRequestRetrievalIndex.Inc()
 	err = db.retrievalDataIndex.PutInBatch(batch, item)
 	if err != nil {
 		return false, 0, err
@@ -263,6 +264,7 @@ func (db *DB) putUpload(batch *leveldb.Batch, binIDs map[uint8]uint64, item shed
 	if err != nil {
 		return false, 0, err
 	}
+	db.metrics.TotalUploadRetrievalIndex.Inc()
 	err = db.retrievalDataIndex.PutInBatch(batch, item)
 	if err != nil {
 		return false, 0, err
