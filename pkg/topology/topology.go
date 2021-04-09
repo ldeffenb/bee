@@ -40,6 +40,8 @@ type ClosestPeerer interface {
 	// This function will ignore peers with addresses provided in skipPeers.
 	// Returns topology.ErrWantSelf in case base is the closest to the address.
 	ClosestPeer(addr swarm.Address, skipPeers ...swarm.Address) (peerAddr swarm.Address, err error)
+	// Try to connect a new peer close to the specified address
+	ConnectCloserPeer(addr swarm.Address, closerThan swarm.Address)
 }
 
 type EachPeerer interface {

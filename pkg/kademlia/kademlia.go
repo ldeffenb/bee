@@ -964,6 +964,10 @@ func isIn(a swarm.Address, addresses []p2p.Peer) bool {
 	return false
 }
 
+func (k *Kad) ConnectCloserPeer(addr swarm.Address, closerThan swarm.Address) {
+	k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s", addr.String(), closerThan.String())
+}
+
 // ClosestPeer returns the closest peer to a given address.
 func (k *Kad) ClosestPeer(addr swarm.Address, skipPeers ...swarm.Address) (swarm.Address, error) {
 	if k.connectedPeers.Length() == 0 {
