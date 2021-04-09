@@ -164,7 +164,7 @@ LOOP:
 						s.metrics.TotalSynced.Inc()
 						s.metrics.SyncTime.Observe(time.Since(startTime).Seconds())
 						// only print this if there was no error while sending the chunk
-						logger.Debugf("pusher pushed chunk %s in %d tries over %s", ch.Address().String(), retry.count, time.Since(retry.first))
+						logger.Debugf("pusher pushed chunk %s in %d tries over %s", ch.Address().String(), retry.count, time.Since(retry.first).Truncate(time.Millisecond))
 					} else {
 						s.metrics.TotalErrors.Inc()
 						s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
@@ -204,12 +204,12 @@ LOOP:
 		if retry.count < 5 || time.Since(retry.first) < time.Duration(5)*time.Minute {
 			s.retries[ch.Address().String()] = retry
 			s.retryMtx.Unlock()
-			logger.Debugf("pusher retried %d over %s pending chunk %s", retry.count, time.Since(retry.first), ch.Address().String())
+			logger.Debugf("pusher retried %d over %s pending chunk %s", retry.count, time.Since(retry.first).Truncate(time.Millisecond), ch.Address().String())
 			return	// Keep trying this one
 		}
 		s.retries[ch.Address().String()] = retry
 		s.retryMtx.Unlock()
-		logger.Debugf("pusher retried %d over %s, keeping chunk %s", retry.count, time.Since(retry.first), ch.Address().String())
+		logger.Debugf("pusher retried %d over %s, keeping chunk %s", retry.count, time.Since(retry.first).Truncate(time.Millisecond), ch.Address().String())
 
 
 					}
