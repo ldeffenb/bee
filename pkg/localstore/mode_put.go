@@ -119,12 +119,13 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 				exist[i] = true
 				continue
 			}
-			exists, c, err := db.putUpload(batch, binIDs, chunkToItem(ch))
+			pinning := (mode == storage.ModePutUploadPin)
+			exists, c, err := db.putUpload(batch, binIDs, chunkToItem(ch), pinning)
 			if err != nil {
 				return nil, err
 			}
 			exist[i] = exists
-			if !exists {
+			if !exists || pinning {
 				// chunk is new so, trigger subscription feeds
 				// after the batch is successfully written
 				triggerPullFeed[db.po(ch.Address())] = struct{}{}
@@ -250,12 +251,35 @@ func (db *DB) putRequest(batch *leveldb.Batch, binIDs map[uint8]uint64, item she
 //  - put to indexes: retrieve, push, pull
 // The batch can be written to the database.
 // Provided batch and binID map are updated.
-func (db *DB) putUpload(batch *leveldb.Batch, binIDs map[uint8]uint64, item shed.Item) (exists bool, gcSizeChange int64, err error) {
+func (db *DB) putUpload(batch *leveldb.Batch, binIDs map[uint8]uint64, item shed.Item, pinning bool) (exists bool, gcSizeChange int64, err error) {
 	exists, err = db.retrievalDataIndex.Has(item)
 	if err != nil {
 		return false, 0, err
 	}
 	if exists {
+		if pinning {
+			i, err := db.retrievalDataIndex.Get(item)
+			if err != nil {
+				if errors.Is(err, leveldb.ErrNotFound) {
+					db.logger.Warningf("put(UploadPin) UNKNOWN %s", swarm.NewAddress(item.Address).String())
+					return false, 0, nil
+				} else {
+					db.logger.Warningf("put(UploadPin) %s, err %v", swarm.NewAddress(item.Address).String(), err)
+				}
+				return false, 0, err
+			}
+			item.StoreTimestamp = i.StoreTimestamp
+			item.BinID = i.BinID
+			pushing, err := db.pushIndex.Has(item)
+			if !pushing {
+				db.logger.Debugf("put(UploadPin) REPUSH %s", swarm.NewAddress(item.Address).String())
+				err = db.pushIndex.PutInBatch(batch, item)
+				if err != nil {
+					db.logger.Debugf("put(UploadPin) REPUSH %s, err %v", swarm.NewAddress(item.Address).String(), err)
+					return false, 0, err
+				}
+			}
+		}
 		return true, 0, nil
 	}
 
