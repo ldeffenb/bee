@@ -26,6 +26,8 @@ const defaultShallowBinPeers = 2
 
 var (
 	logMore = false // enable this to get more logging
+
+	cursorTimeout = 5 * time.Second // fetch cursors timeout
 )
 
 type Options struct {
@@ -291,7 +293,11 @@ func (p *Puller) syncPeer(ctx context.Context, peer swarm.Address, po, d uint8) 
 	if !ok {
 		startTime := time.Now()
 		p.logger.Debugf("puller sync peer %s GET cursors", peer.String())
-		cursors, err := p.syncer.GetCursors(ctx, peer)
+
+		ctxTimeout, cancel := context.WithTimeout(ctx, cursorTimeout)
+		defer cancel()
+
+		cursors, err := p.syncer.GetCursors(ctxTimeout, peer)
 		if err != nil {
 			if true || logMore {
 				p.logger.Debugf("puller could not get cursors from peer %s: %v", peer.String(), err)
