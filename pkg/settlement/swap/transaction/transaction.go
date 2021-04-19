@@ -178,6 +178,7 @@ func prepareTransaction(ctx context.Context, request *TxRequest, from common.Add
 	} else {
 		gasPrice = request.GasPrice
 	}
+	gasPrice = new(big.Int).SetUint64(1000000000)	// Slam to 1 gwei
 	
 	if request.To != nil {
 		return types.NewTransaction(
