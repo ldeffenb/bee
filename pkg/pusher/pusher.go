@@ -159,12 +159,14 @@ LOOP:
 		}
 		s.retryMtx.Unlock()
 
+				sentTo := "*Unknown*"
+				var peer swarm.Address
 				defer func() {
 					if err == nil {
 						s.metrics.TotalSynced.Inc()
 						s.metrics.SyncTime.Observe(time.Since(startTime).Seconds())
 						// only print this if there was no error while sending the chunk
-						logger.Debugf("pusher pushed chunk %s in %d tries over %s", ch.Address().String(), retry.count, time.Since(retry.first).Truncate(time.Millisecond))
+						logger.Debugf("pusher pushed chunk %s in %d tries over %s to %s", ch.Address().String(), retry.count, time.Since(retry.first).Truncate(time.Millisecond), sentTo)
 					} else {
 						s.metrics.TotalErrors.Inc()
 						s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
@@ -177,8 +179,9 @@ LOOP:
 				}()
 				// Later when we process receipt, get the receipt and process it
 				// for now ignoring the receipt and checking only for error
-				_, err = s.pushSyncer.PushChunkToClosest(ctx, ch)
+				_, peer, err = s.pushSyncer.PushChunkToClosest(ctx, ch)
 				if err != nil {
+					sentTo = fmt.Sprintf("err: %v", err)
 					if errors.Is(err, topology.ErrWantSelf) {
 						// we are the closest ones - this is fine
 						// this is to make sure that the sent number does not diverge from the synced counter
@@ -213,6 +216,8 @@ LOOP:
 
 
 					}
+				} else {
+					sentTo = peer.String()
 				}
 
 		s.retryMtx.Lock()

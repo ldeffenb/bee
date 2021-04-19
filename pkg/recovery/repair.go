@@ -62,7 +62,7 @@ func NewRepairHandler(s storage.Storer, logger logging.Logger, pushSyncer pushsy
 		}
 
 		// push the chunk using push sync so that it reaches it destination in network
-		_, err = pushSyncer.PushChunkToClosest(ctx, ch)
+		_, _, err = pushSyncer.PushChunkToClosest(ctx, ch)
 		if err != nil {
 			logger.Tracef("chunk repair: error while sending chunk or receiving receipt: %v", err)
 			return

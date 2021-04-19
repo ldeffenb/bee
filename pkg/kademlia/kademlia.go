@@ -84,6 +84,9 @@ type Kad struct {
 	done              chan struct{}  // signal that `manage` has quit
 	wg                sync.WaitGroup
 	
+	closerMtx sync.Mutex
+	closerPeers map[string]string
+	
 	peersLoaded bool
 	peersDumped bool
 }
@@ -121,6 +124,8 @@ func New(base swarm.Address, addressbook addressbook.Interface, discovery discov
 		quit:              make(chan struct{}),
 		done:              make(chan struct{}),
 		wg:                sync.WaitGroup{},
+
+		closerPeers:       make(map[string]string),
 	}
 
 	if k.bitSuffixLength > 0 {
@@ -271,8 +276,93 @@ func (k *Kad) manage() {
 				k.logger.Debugf("kademlia:Reset saturation to %d, %d peers connected", saturationPeers, k.connectedPeers.Length())
 			}
 
-			// attempt balanced connection first
+
+			// connect up the closer peers first
 			err := func() error {
+			
+				k.closerMtx.Lock()
+				pendingPeers := k.closerPeers
+				k.closerPeers = make(map[string]string)
+				k.closerMtx.Unlock()
+			
+				// for each pending peer
+				for peerAddrString, chunkAddrString := range pendingPeers {
+
+					peer := swarm.MustParseHexAddress(peerAddrString)
+
+					k.logger.Debugf("closer connecting to %s for %s", peer.String(), chunkAddrString)
+
+					if k.connectedPeers.Exists(peer) {
+						continue
+					}
+
+					bzzAddr, err := k.addressBook.Get(peer)
+					if err != nil {
+						if err == addressbook.ErrNotFound {
+							k.logger.Debugf("closer failed to get address book entry for peer: %s", peer.String())
+							po := swarm.Proximity(k.base.Bytes(), peer.Bytes())
+							k.knownPeers.Remove(peer, po)
+							continue
+						}
+						// either a peer is not known in the address book, in which case it
+						// should be removed, or that some severe I/O problem is at hand
+						k.logger.Debugf("closer failed to get address book entry for peer: %s err: %v", peer.String(), err)
+						continue
+					}
+
+					po := swarm.Proximity(k.base.Bytes(), peer.Bytes())
+
+					attemptedCount++
+					err = k.connect(ctx, peer, bzzAddr.Underlay, po)
+					if err != nil {
+						if errors.Is(err, errOverlayMismatch) {
+							k.knownPeers.Remove(peer, po)
+							if err := k.addressBook.Remove(peer); err != nil {
+								k.logger.Debugf("closer could not remove peer from addressbook: %s", peer.String())
+							}
+						}
+						k.logger.Debugf("closer peer not reachable from kademlia %s: %v", bzzAddr.String(), err)
+
+						k.waitNextMu.Lock()
+						if _, ok := k.waitNext[peer.String()]; !ok {
+							// don't override existing data in the map
+							k.waitNext[peer.String()] = retryInfo{tryAfter: time.Now().Add(timeToRetry)}
+						}
+						k.waitNextMu.Unlock()
+
+						// continue to next
+						continue
+					}
+					
+					k.waitNextMu.Lock()
+					k.waitNext[peer.String()] = retryInfo{tryAfter: time.Now().Add(shortRetry)}
+					k.waitNextMu.Unlock()
+
+					k.connectedPeers.Add(peer, po)
+
+					k.depthMu.Lock()
+					k.depth = recalcDepth(k.connectedPeers)
+					k.depthMu.Unlock()
+
+					k.logger.Debugf("connected to closer peer: %s for chunk %s", peer, chunkAddrString)
+					connectedCount++
+
+					k.notifyPeerSig()
+				}
+				return nil
+			}()
+			k.logger.Tracef("kademlia closer connector took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
+
+
+
+
+
+			start = time.Now()
+			attemptedCount = 0
+			connectedCount = 0
+
+			// attempt balanced connection first
+			err = func() error {
 				// for each bin
 				for i := range k.commonBinPrefixes {
 					// and each pseudo address
@@ -447,6 +537,7 @@ func (k *Kad) manage() {
 				k.logger.Tracef("kademlia:bin[] peers dumped")
 			}
 
+			start = time.Now()
 			attemptedCount = 0
 			connectedCount = 0
 			for po := 0; po < len(deckOfPeers); po++ {
@@ -466,6 +557,8 @@ func (k *Kad) manage() {
 					if err == addressbook.ErrNotFound {
 						k.logger.Debugf("failed to get address book entry for peer: %s", peer.String())
 						peerToRemove = peer
+						po := swarm.Proximity(k.base.Bytes(), peerToRemove.Bytes())
+						k.knownPeers.Remove(peerToRemove, po)
 						//return false, false, errMissingAddressBookEntry
 						continue
 					}
@@ -965,7 +1058,51 @@ func isIn(a swarm.Address, addresses []p2p.Peer) bool {
 }
 
 func (k *Kad) ConnectCloserPeer(addr swarm.Address, closerThan swarm.Address) {
-	k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s", addr.String(), closerThan.String())
+	spf := func(peer swarm.Address) bool {
+		if k.connectedPeers.Exists(peer) {
+			return true
+		}
+		k.waitNextMu.Lock()
+		defer k.waitNextMu.Unlock()
+		if next, ok := k.waitNext[peer.String()]; ok && time.Now().Before(next.tryAfter) {
+			return true
+		}
+		return false
+	}
+	closerKnownPeer, err := closestPeer(k.knownPeers, addr, spf, swarm.ZeroAddress)
+	if err != nil {
+		k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s, err %v", addr.String(), closerThan.String(), err)
+	} else { 
+// DistanceCmp compares x and y to a in terms of the distance metric defined in the swarm specfication.
+// it returns:
+// 	1 if x is closer to a than y
+// 	0 if x and y are equally far apart from a (this means that x and y are the same address)
+// 	-1 if x is farther from a than y
+// Fails if not all addresses are of equal length.
+//func DistanceCmp(a, x, y []byte) (int, error) {
+		cmp, err := swarm.DistanceCmp(addr.Bytes(), closerKnownPeer.Bytes(), closerThan.Bytes())
+		if err != nil {
+		} else {
+			if cmp != 1 {
+				k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s NOT(%d) %s", addr.String(), closerThan.String(), cmp, closerKnownPeer.String())
+			} else {
+
+				k.closerMtx.Lock()
+				defer k.closerMtx.Unlock()
+				if _, ok := k.closerPeers[closerKnownPeer.String()]; !ok {
+					k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s NEW %s", addr.String(), closerThan.String(), closerKnownPeer.String())
+					k.closerPeers[closerKnownPeer.String()] = addr.String()
+					k.logger.Tracef("kademlia ConnectCloserPeer kicking manageC")
+					select {
+					case k.manageC <- struct{}{}:
+					default:
+					}
+				} else {
+					k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s pending %s", addr.String(), closerThan.String(), closerKnownPeer.String())
+				}
+			}
+		}
+	}
 }
 
 // ClosestPeer returns the closest peer to a given address.

@@ -40,7 +40,7 @@ const (
 )
 
 type PushSyncer interface {
-	PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Receipt, error)
+	PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Receipt, swarm.Address, error)
 }
 
 type Receipt struct {
@@ -48,6 +48,7 @@ type Receipt struct {
 }
 
 type PushSync struct {
+	base		  swarm.Address
 	streamer      p2p.StreamerDisconnecter
 	storer        storage.Putter
 	peerSuggester topology.ClosestPeerer
@@ -62,10 +63,10 @@ type PushSync struct {
 	pushMtx sync.Mutex
 	pushSem map[string]semChannel
 	pushCount map[string]int
-	pushErrors map[string]pushError
+	pushPeers map[string]*pushPeer	// key on chunk ID
 
 	pushMtx2 sync.Mutex
-	pushLast map[string]time.Time
+	pushLast map[string]*lastPush
 }
 
 var (
@@ -76,13 +77,26 @@ var timeToLive = 5 * time.Second // request time to live
 
 type semChannel chan struct {}
 
+type pushPeer struct {
+	pushErrors map[string]*pushError	// key on peer ID
+}
+
 type pushError struct {
 	skips		int
 	failures	int
+	clears		int
+	lastUsed	time.Time
 }
 
-func New(streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer topology.ClosestPeerer, tagger *tags.Tags, unwrap func(swarm.Chunk), logger logging.Logger, accounting accounting.Interface, pricer accounting.Pricer, tracer *tracing.Tracer) *PushSync {
+type lastPush struct {
+	count	int
+	next	time.Duration
+	when time.Time
+}
+
+func New(base swarm.Address, streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer topology.ClosestPeerer, tagger *tags.Tags, unwrap func(swarm.Chunk), logger logging.Logger, accounting accounting.Interface, pricer accounting.Pricer, tracer *tracing.Tracer) *PushSync {
 	ps := &PushSync{
+		base:		   base,
 		streamer:      streamer,
 		storer:        storer,
 		peerSuggester: closestPeerer,
@@ -95,9 +109,11 @@ func New(streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer
 		tracer:        tracer,
 		pushCount: make(map[string]int),
 		pushSem:  make(map[string]semChannel),
-		pushLast:  make(map[string]time.Time),
-		pushErrors:  make(map[string]pushError),
+		pushLast:  make(map[string]*lastPush),
+		pushPeers:  make(map[string]*pushPeer),
 	}
+	ps.logger.Tracef("pushCSV,status,bits,elapsed,peer,chunk,distance")
+	ps.logger.Tracef("pushCSV,myAddr,,,%s", base.String())
 	return ps
 }
 
@@ -154,15 +170,18 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 	if (supportForward) {
 		tooSoon := false
 		ps.pushMtx2.Lock()
-		timeLast, ok := ps.pushLast[chunk.Address().String()]
+		last, ok := ps.pushLast[chunk.Address().String()]
 		if ok {
-			tooSoon = time.Since(timeLast) < time.Duration(5)*time.Minute
+			tooSoon = time.Since(last.when) < last.next
 			if !tooSoon {
-				ps.logger.Tracef("pushsync: tooSoon allowing %s chunk %s", time.Since(ps.pushLast[chunk.Address().String()]), chunk.Address().String())
+				last.count++
+				ps.logger.Tracef("pushsync: tooSoon allowing %d after %s/%s chunk %s", last.count, time.Since(last.when), last.next, chunk.Address().String())
+				last.next *= 2	// Double the duration with each retry
+				last.when = time.Now()
 			}
-		}
-		if (!tooSoon) {
-			ps.pushLast[chunk.Address().String()] = time.Now()
+		} else {
+			last = &lastPush{next: time.Duration(1)*time.Minute, count: 1, when: time.Now(), }
+			ps.pushLast[chunk.Address().String()] = last
 		}
 		ps.pushMtx2.Unlock()
 
@@ -186,7 +205,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 		}
 		return ps.accounting.Debit(p.Address, ps.pricer.Price(chunk.Address()))
 	} else {
-		receipt, err := ps.pushToClosest(ctx, chunk, timeToWaitForReceipt)
+		receipt, _, err := ps.pushToClosest(ctx, chunk, timeToWaitForReceipt)
 		if err != nil {
 			if errors.Is(err, topology.ErrWantSelf) {
 				go func(ctx context.Context, chunk swarm.Chunk) {
@@ -219,15 +238,15 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 // PushChunkToClosest sends chunk to the closest peer by opening a stream. It then waits for
 // a receipt from that peer and returns error or nil based on the receiving and
 // the validity of the receipt.
-func (ps *PushSync) PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Receipt, error) {
-	r, err := ps.pushToClosest(ctx, ch, timeToWaitForFirstReceipt)
+func (ps *PushSync) PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Receipt, swarm.Address, error) {
+	r, peer, err := ps.pushToClosest(ctx, ch, timeToWaitForFirstReceipt)
 	if err != nil {
-		return nil, err
+		return nil, swarm.ZeroAddress, err
 	}
-	return &Receipt{Address: swarm.NewAddress(r.Address)}, nil
+	return &Receipt{Address: swarm.NewAddress(r.Address)}, peer, nil
 }
 
-func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.Duration) (rr *pb.Receipt, reterr error) {
+func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.Duration) (rr *pb.Receipt, peerAddr swarm.Address, reterr error) {
 	ps.metrics.ClosestConcurrency1.Inc()
 	defer ps.metrics.ClosestConcurrency1.Dec()
 	span, logger, ctx := ps.tracer.StartSpanFromContext(ctx, "push-closest", ps.logger, opentracing.Tag{Key: "address", Value: ch.Address().String()})
@@ -257,7 +276,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 	for i := 0; i < maxPeers; i++ {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, swarm.ZeroAddress, ctx.Err()
 		default:
 		}
 
@@ -269,7 +288,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 			// ClosestPeer can return ErrNotFound in case we are not connected to any peers
 			// in which case we should return immediately.
 			// if ErrWantSelf is returned, it means we are the closest peer.
-			return nil, fmt.Errorf("closest peer: %w", err)
+			return nil, swarm.ZeroAddress, fmt.Errorf("closest peer: %w", err)
 		}
 
 		// save found peer (to be skipped if there is some error with him)
@@ -280,7 +299,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 		deferFuncs = append(deferFuncs, func() {
 			if lastErr != nil {
 				ps.metrics.TotalErrors.Inc()
-				logger.Errorf("pushsync: %v", lastErr)
+				//logger.Errorf("pushsync: chunk %s lastErr: %v", ch.Address().String(), lastErr)
 			}
 		})
 
@@ -294,27 +313,42 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 		}
 		deferFuncs = append(deferFuncs, func() { ps.accounting.Release(peer, receiptPrice) })
 
+		chunkString := ch.Address().String()
 		peerString := peer.String()
 		//lockTime := time.Now()
 		ps.pushMtx.Lock()
 		semPush, ok := ps.pushSem[peerString]
 		if !ok {
-			ps.pushSem[peerString] = make(chan struct{}, 2)	// Currently allowing 2 per peer
+			ps.pushSem[peerString] = make(chan struct{}, 1)	// Currently allowing 1 per peer
 			semPush, ok = ps.pushSem[peerString]
-			ps.pushErrors[peerString] = pushError{}
 		}
-		pe := ps.pushErrors[peerString]
-		if false && pe.skips < pe.failures {
+		_, ok = ps.pushPeers[chunkString]
+		if !ok {
+			ps.pushPeers[chunkString] = &pushPeer{pushErrors:  make(map[string]*pushError),}
+		}
+		pe, ok := ps.pushPeers[chunkString].pushErrors[peerString]
+		if !ok {
+			ps.pushPeers[chunkString].pushErrors[peerString] = &pushError{}
+			pe = ps.pushPeers[chunkString].pushErrors[peerString]
+		}
+
+		if pe.skips < pe.failures {
 			maxPeers++	// Try one extra further peer having skipping this bad one
-			logger.Debugf("[%d/%d] chunk %s skipping %d/%d peer %s", i+1, maxPeers, ch.Address().String(), pe.skips, pe.failures, peer.String())
-			lastErr = fmt.Errorf("skipping %d/%d peer %s", pe.skips, pe.failures, peer.String())
+			if maxPeers > maxClosestPeers*2 {
+				maxPeers = maxClosestPeers*2
+			}
+			//logger.Debugf("[%d/%d] chunk %s skipping %d/%d peer %s", i+1, maxPeers, ch.Address().String(), pe.skips, pe.failures, peer.String())
+			if lastErr == nil {
+				lastErr = fmt.Errorf("skipping %d/%d peer %s", pe.skips, pe.failures, peer.String())
+			}
 			pe.skips++
-			ps.pushErrors[peerString] = pe
+			//ps.pushErrors[peerString] = pe
 			ps.pushMtx.Unlock()
 			continue
 		}
 		pe.skips = 0	// Start skipping all over again after letting one go through
-		ps.pushErrors[peerString] = pe
+		pe.lastUsed = time.Now()
+		//ps.pushErrors[peerString] = pe
 		ps.pushCount[peerString] = ps.pushCount[peerString] + 1
 		ps.pushMtx.Unlock()
 		semPush <- struct{}{}
@@ -326,6 +360,8 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 		
 		//lockDelta := time.Now().Sub(lockTime).String()
 		ps.metrics.ClosestConcurrency2.Inc()
+
+		thisPeerStart := time.Now()
 
 		streamer, err := ps.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
 		if err != nil {
@@ -363,7 +399,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 				err = lastErr
 				ps.metrics.ClosestConcurrency2.Dec()
 				<-semPush	// Release the next one for this peer
-				return nil, err
+				return nil, swarm.ZeroAddress, err
 			}
 		}
 
@@ -376,20 +412,40 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 			lastErr = fmt.Errorf("pushsync: %s chunk %s receive receipt from peer %s: %w", time.Since(start), ch.Address().String(), peer.String(), err)
 			
 			ps.pushMtx.Lock()
-			pe := ps.pushErrors[peerString]
-			pe.failures++
-			ps.pushErrors[peerString] = pe
+			ps.pushPeers[chunkString].pushErrors[peerString].failures++
 			ps.pushMtx.Unlock()
 			
 			ps.metrics.ClosestConcurrency2.Dec()
 			<-semPush	// Release the next one for this peer
 			ps.logger.Tracef("pushsync[%d/%d]:sending chunk %s to peer %s, err:%v", i+1, maxPeers, ch.Address().String(), peer.String(), lastErr)
+			{
+				thisPeerElapsed := time.Since(thisPeerStart)
+				sharedBits := swarm.ExtendedProximity(ch.Address().Bytes(), peer.Bytes())
+				distance, _ := swarm.Distance(ch.Address().Bytes(), peer.Bytes())
+				ps.logger.Tracef("pushCSV,error,%d,%s,%s,%s,%s", sharedBits, thisPeerElapsed, peer.String(), ch.Address().String(), distance)
+			}
 			continue
 		}
-		ps.logger.Tracef("pushsync[%d/%d]:success %s/%s chunk %s receive receipt from peer %s", i+1, maxPeers, time.Since(start), time.Since(loopStart), ch.Address().String(), peer.String())
+		if maxPeers > maxClosestPeers {
+			ps.logger.Tracef("pushsync[%d/%d]:SUCCESS %s/%s chunk %s receive receipt from peer %s", i+1, maxPeers, time.Since(start), time.Since(loopStart), ch.Address().String(), peer.String())
+		} else {
+			ps.logger.Tracef("pushsync[%d/%d]:success %s/%s chunk %s receive receipt from peer %s", i+1, maxPeers, time.Since(start), time.Since(loopStart), ch.Address().String(), peer.String())
+		}
 
+		{
+			thisPeerElapsed := time.Since(thisPeerStart)
+			sharedBits := swarm.ExtendedProximity(ch.Address().Bytes(), peer.Bytes())
+			distance, _ := swarm.Distance(ch.Address().Bytes(), peer.Bytes())
+			ps.logger.Tracef("pushCSV,success,%d,%s,%s,%s,%s", sharedBits, thisPeerElapsed, peer.String(), ch.Address().String(), distance)
+		}
+		
 		ps.pushMtx.Lock()
-		ps.pushErrors[peerString] = pushError{}	// Clear all accumulated errors on success
+		if ps.pushPeers[chunkString].pushErrors[peerString].failures > 0 {
+			ps.pushPeers[chunkString].pushErrors[peerString].clears++
+			ps.logger.Tracef("pushsync[%d/%d]:chunk %s cleared (%d) skip (%d/%d) peer %s", i+1, maxPeers, ch.Address().String(), ps.pushPeers[chunkString].pushErrors[peerString].clears, ps.pushPeers[chunkString].pushErrors[peerString].skips, ps.pushPeers[chunkString].pushErrors[peerString].failures, peer.String())
+			ps.pushPeers[chunkString].pushErrors[peerString].failures = 0
+			ps.pushPeers[chunkString].pushErrors[peerString].lastUsed = time.Now()
+		}
 		ps.pushMtx.Unlock()
 
 		if !ch.Address().Equal(swarm.NewAddress(receipt.Address)) {
@@ -404,12 +460,12 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 		if err != nil {
 			ps.metrics.ClosestConcurrency2.Dec()
 			<-semPush	// Release the next one for this peer
-			return nil, err
+			return nil, swarm.ZeroAddress, err
 		}
 
 		ps.metrics.ClosestConcurrency2.Dec()
 		<-semPush	// Release the next one for this peer
-		return &receipt, nil
+		return &receipt, peer, nil
 	}
 
 	if haveLastAddress {
@@ -418,10 +474,10 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 
 	if lastErr != nil {
 		logger.Debugf("pushsync: chunk %s: failed %d peers, err:%v", ch.Address().String(), maxPeers, lastErr)
-		return nil, lastErr
+		return nil, swarm.ZeroAddress, lastErr
 	}
 
 	logger.Debugf("pushsync: chunk %s: failed %d peers, err:%v", ch.Address().String(), maxPeers, topology.ErrNotFound)
 
-	return nil, topology.ErrNotFound
+	return nil, swarm.ZeroAddress, topology.ErrNotFound
 }

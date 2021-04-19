@@ -92,7 +92,7 @@ func (p *pss) Send(ctx context.Context, topic Topic, payload []byte, recipient *
 	}
 
 	// push the chunk using push sync so that it reaches it destination in network
-	if _, err = p.pusher.PushChunkToClosest(ctx, tc); err != nil {
+	if _, _, err = p.pusher.PushChunkToClosest(ctx, tc); err != nil {
 		return err
 	}
 
