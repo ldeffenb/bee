@@ -128,10 +128,15 @@ func (p *Puller) manage() {
 				peersToRecalc     []peer
 				peersDisconnected = make(map[string]peer)
 			)
-
+			
 			p.logger.Debugf("puller scanning syncpeers depth %d", depth)
 			p.syncPeersMtx.Lock()
 			scanStartTime := time.Now()
+
+			if depth < 10 {
+				p.logger.Debugf("puller NOT scanning syncpeers depth %d, need at least 10", depth)
+			} else
+			{
 
 			// make a map of all peers we're syncing with, then remove from it
 			// the entries we get from kademlia  in the iterator, this way we
@@ -211,6 +216,7 @@ func (p *Puller) manage() {
 			for _, v := range peersDisconnected {
 				p.logger.Debugf("puller disconnected peer %s po %d depth %d", v.addr, v.po, depth)
 				p.disconnectPeer(ctx, v.addr, v.po)
+			}
 			}
 
 			p.syncPeersMtx.Unlock()
