@@ -206,7 +206,7 @@ s.logger.Tracef("pullsync:SyncInterval:readOffer Ruid:%d bin:%d %d-%d for %s", i
 	if err = r.ReadMsgWithContext(ctx, &offer); err != nil {
 		return 0, ru.Ruid, fmt.Errorf("read offer: %w", err)
 	}
-s.logger.Tracef("pullsync:SyncInterval:Offer got %d Ruid:%d bin:%d %d-%d for %s", len(offer.Hashes)/swarm.HashSize, int(ru.Ruid), int(bin), from, to, peer.String())
+s.logger.Tracef("pullsync:SyncInterval:Offer got %d Ruid:%d bin:%d %d-%d/%d for %s", len(offer.Hashes)/swarm.HashSize, int(ru.Ruid), int(bin), from, to, offer.Topmost, peer.String())
 
 	if len(offer.Hashes)%swarm.HashSize != 0 {
 		return 0, ru.Ruid, fmt.Errorf("inconsistent hash length")
@@ -215,7 +215,7 @@ s.logger.Tracef("pullsync:SyncInterval:Offer got %d Ruid:%d bin:%d %d-%d for %s"
 	// empty interval (no chunks present in interval).
 	// return the end of the requested range as topmost.
 	if len(offer.Hashes) == 0 {
-s.logger.Tracef("pullsync:SyncInterval:ZEROOffer Ruid:%d bin:%d %d-%d for %s", int(ru.Ruid), int(bin), from, to, peer.String())
+s.logger.Tracef("pullsync:SyncInterval:ZEROOffer Ruid:%d bin:%d %d-%d/%d for %s", int(ru.Ruid), int(bin), from, to, offer.Topmost, peer.String())
 		return offer.Topmost, ru.Ruid, nil
 	}
 
@@ -517,19 +517,36 @@ func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange, peer swarm.Addre
 	peerBytes := peer.Bytes()
 	sharedBits := swarm.ExtendedProximity(myAddressBytes, peerBytes)
 	
-	if int(sharedBits) < 4 && int(rn.Bin) > 4 && rn.To != math.MaxUint64 {
-	        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d IMPOSSIBLE for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, peer.String())
-		o.Topmost = rn.To	// Nothing more to ask from here
-		return o, nil, nil
-	}
-	if rn.From == 0 && rn.To == 1 {
-        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d patch to avoid ZERO for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, peer.String())
-		rn.To = math.MaxUint64
-	}
 	start := rn.From
 	rejects := 0
 	startTime := time.Now()
 	maxDelay := time.Duration(1)*time.Minute
+	lastBinID, _ := s.storage.LastPullSubscriptionBinID(uint8(rn.Bin))
+
+	if rn.From == 0 && rn.To == 1 {
+        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d patch to avoid ZERO for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, lastBinID, peer.String())
+		rn.To = math.MaxUint64
+	}
+	if int(sharedBits) < int(rn.Bin) && int(sharedBits) < 12 && rn.To != math.MaxUint64 {
+        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d IMPOSSIBLE for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, lastBinID, peer.String())
+		o.Topmost = rn.To	// Nothing more to ask from here
+s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, lastBinID, len(o.Hashes)/swarm.HashSize, o.Topmost, peer.String())
+		return o, nil, nil
+	}
+	if int(rn.Bin) < 12 && rn.To != math.MaxUint64 {
+        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d IMPOSSIBLE for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, lastBinID, peer.String())
+		o.Topmost = rn.To	// Nothing more to ask from here
+s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, lastBinID, len(o.Hashes)/swarm.HashSize, o.Topmost, peer.String())
+		return o, nil, nil
+	}
+	if int(sharedBits) < int(rn.Bin) && int(sharedBits) < 12 && start != lastBinID+1 && rn.To == math.MaxUint64 {
+        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d JUMPING for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, lastBinID, peer.String())
+		start = lastBinID+1	// Start at the current max+1 - Hopefully this waits for the next insert
+	}
+	if int(rn.Bin) < 12 && start != lastBinID+1 && rn.To == math.MaxUint64 {
+        s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d JUMPING for %s", int(rn.Bin), int(sharedBits), rn.From, rn.To, lastBinID, peer.String())
+		start = lastBinID+1	// Start at the current max+1 - Hopefully this waits for the next insert
+	}
 
 	for start < rn.To && rejects < maxPage * 100 {
 		chs, top, err := s.storage.IntervalChunks(ctx, uint8(rn.Bin), start, rn.To, maxPage)
@@ -559,13 +576,13 @@ func (s *Syncer) makeOffer(ctx context.Context, rn pb.GetRange, peer swarm.Addre
 			o.Hashes = append(o.Hashes, v.Bytes()...)
 			s.metrics.HandlerOfferCounter.Inc()
 		}
-s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
+s.logger.Tracef("pullsync:makeOffer:bin %d/%d %d-%d/%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, lastBinID, len(o.Hashes)/swarm.HashSize, top, peer.String())
 //if len(o.Hashes)/swarm.HashSize > 0 && int(rn.Bin) > int(sharedBits) && int(rn.Bin) < 4 {
 //	s.logger.Tracef("pullsync:makeOffer:OOPS:bin %d/%d %d-%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
 //}
 		if len(o.Hashes)/swarm.HashSize > 0 || time.Since(startTime) >= maxDelay  {
 if int(sharedBits) < 4 && int(rn.Bin) > 4 && len(o.Hashes)/swarm.HashSize > 0 {
-	s.logger.Tracef("pullsync:makeOffer:OOPS:bin %d/%d %d-%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, len(o.Hashes)/swarm.HashSize, top, peer.String())
+	s.logger.Tracef("pullsync:makeOffer:OOPS:bin %d/%d %d-%d/%d got (%d)->%d for %s", int(rn.Bin), int(sharedBits), start, rn.To, lastBinID, len(o.Hashes)/swarm.HashSize, top, peer.String())
 }
 			
 			return o, chs, nil
