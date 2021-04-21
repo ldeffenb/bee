@@ -60,9 +60,9 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 	totalTimeMetric(db.metrics.BatchLockWaitTimePut, startLock)
 	defer func(waitTime time.Duration, start time.Time) {
 		if len(chs) == 1 {
-			db.logger.Debugf("put(%s) %d chunks waited %s executed %s %s", mode.String(), len(chs), waitTime, time.Since(start), chs[0].Address().String())
+			db.logger.Tracef("put(%s) %d chunks waited %s executed %s %s", mode.String(), len(chs), waitTime, time.Since(start), chs[0].Address().String())
 		} else {
-			db.logger.Debugf("put(%s) %d chunks waited %s executed %s", mode.String(), len(chs), waitTime, time.Since(start))
+			db.logger.Tracef("put(%s) %d chunks waited %s executed %s", mode.String(), len(chs), waitTime, time.Since(start))
 		}
 	}(time.Since(startLock), time.Now())
 	defer totalTimeMetric(db.metrics.BatchLockHeldTimePut, time.Now())

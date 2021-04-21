@@ -105,7 +105,7 @@ LOOP:
 					dur = 500 * time.Millisecond
 				}
 				timer.Reset(dur)
-				s.logger.Tracef("pusher finished pushing %d chunks in batch, %d inflight", chunksInBatch, len(inflight))
+				s.logger.Debugf("pusher finished pushing %d chunks in batch, %d inflight", chunksInBatch, len(inflight))
 				break
 			}
 
@@ -170,7 +170,7 @@ LOOP:
 					} else {
 						s.metrics.TotalErrors.Inc()
 						s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
-						logger.Debugf("pusher chunk %s err %v", ch.Address().String(), err)
+						logger.Tracef("pusher chunk %s err %v", ch.Address().String(), err)
 					}
 					mtx.Lock()
 					delete(inflight, ch.Address().String())
@@ -207,7 +207,7 @@ LOOP:
 		if retry.count < 5 || time.Since(retry.first) < time.Duration(5)*time.Minute {
 			s.retries[ch.Address().String()] = retry
 			s.retryMtx.Unlock()
-			logger.Debugf("pusher retried %d over %s pending chunk %s", retry.count, time.Since(retry.first).Truncate(time.Millisecond), ch.Address().String())
+			logger.Tracef("pusher retried %d over %s pending chunk %s", retry.count, time.Since(retry.first).Truncate(time.Millisecond), ch.Address().String())
 			return	// Keep trying this one
 		}
 		s.retries[ch.Address().String()] = retry
@@ -260,7 +260,7 @@ LOOP:
 				unsubscribe()
 			}
 
-			s.logger.Tracef("pusher timer.C after %d chunks in batch, %d inflight", chunksInBatch, len(inflight))
+			s.logger.Debugf("pusher timer.C after %d chunks in batch, %d inflight", chunksInBatch, len(inflight))
 
 			chunksInBatch = 0
 

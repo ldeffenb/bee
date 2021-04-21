@@ -200,21 +200,21 @@ func (p *Puller) manage() {
 				return false, false, nil
 			})
 
-			p.logger.Debugf("puller syncing %d peers depth %d", len(peersToSync), depth)
+			p.logger.Debugf("puller syncing %d peers depth %d (now %d)", len(peersToSync), depth, p.topology.NeighborhoodDepth())
 			for _, v := range peersToSync {
-				p.logger.Debugf("puller syncing peer %s po %d depth %d (now %d)", v.addr, v.po, depth, p.topology.NeighborhoodDepth())
+				p.logger.Tracef("puller syncing peer %s po %d depth %d (now %d)", v.addr, v.po, depth, p.topology.NeighborhoodDepth())
 				p.syncPeer(ctx, v.addr, v.po, depth)
 			}
 
 			p.logger.Debugf("puller recalcing %d peers depth %d (now %d)", len(peersToRecalc), depth, p.topology.NeighborhoodDepth())
 			for _, v := range peersToRecalc {
-				p.logger.Debugf("puller recalcing peer %s po %d depth %d", v.addr, v.po, depth)
+				p.logger.Tracef("puller recalcing peer %s po %d depth %d", v.addr, v.po, depth)
 				p.recalcPeer(ctx, v.addr, v.po, depth)
 			}
 
 			p.logger.Debugf("puller disconnecting %d peers depth %d (now %d)", len(peersDisconnected), depth, p.topology.NeighborhoodDepth())
 			for _, v := range peersDisconnected {
-				p.logger.Debugf("puller disconnected peer %s po %d depth %d", v.addr, v.po, depth)
+				p.logger.Tracef("puller disconnected peer %s po %d depth %d", v.addr, v.po, depth)
 				p.disconnectPeer(ctx, v.addr, v.po)
 			}
 			}

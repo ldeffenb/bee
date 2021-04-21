@@ -257,7 +257,7 @@ func (k *Kad) manage() {
 			default:
 			}
 		case <-k.manageC:
-			k.logger.Tracef("kademlia manageC starting after %s idle", time.Since(lastPassDone))
+			k.logger.Debugf("kademlia manageC starting after %s idle", time.Since(lastPassDone))
 			select {
 			case <-k.quit:
 				return
@@ -351,7 +351,7 @@ func (k *Kad) manage() {
 				}
 				return nil
 			}()
-			k.logger.Tracef("kademlia closer connector took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
+			k.logger.Debugf("kademlia closer connector took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
 
 
 
@@ -465,7 +465,7 @@ func (k *Kad) manage() {
 				}
 				return nil
 			}()
-			k.logger.Tracef("kademlia balanced connector took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
+			k.logger.Debugf("kademlia balanced connector took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
 
 			if err != nil {
 				if errors.Is(err, errMissingAddressBookEntry) {
@@ -531,7 +531,7 @@ func (k *Kad) manage() {
 				// be made before checking the next peer, so we iterate to next
 				return false, false, nil
 			})
-			k.logger.Tracef("kademlia took %s to build deck of %d peers", time.Since(deckStart), deckCount)
+			k.logger.Debugf("kademlia took %s to build deck of %d peers", time.Since(deckStart), deckCount)
 			if dumpPeers {
 				k.peersDumped = true
 				k.logger.Tracef("kademlia:bin[] peers dumped")
@@ -613,7 +613,7 @@ func (k *Kad) manage() {
 
 				}
 			}
-			k.logger.Tracef("kademlia iterator took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
+			k.logger.Debugf("kademlia iterator took %s to finish, connected %d/%d", time.Since(start), connectedCount, attemptedCount)
 			if connectedCount == 0 {
 				saturationPeers += incrementSaturationPeers;
 				if saturationPeers > maxSaturationPeers {
@@ -1090,7 +1090,7 @@ func (k *Kad) ConnectCloserPeer(addr swarm.Address, closerThan swarm.Address) {
 				k.closerMtx.Lock()
 				defer k.closerMtx.Unlock()
 				if _, ok := k.closerPeers[closerKnownPeer.String()]; !ok {
-					k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s NEW %s", addr.String(), closerThan.String(), closerKnownPeer.String())
+					k.logger.Debugf("kademlia:ConnectCloserPeer closer to %s than %s NEW %s", addr.String(), closerThan.String(), closerKnownPeer.String())
 					k.closerPeers[closerKnownPeer.String()] = addr.String()
 					k.logger.Tracef("kademlia ConnectCloserPeer kicking manageC")
 					select {

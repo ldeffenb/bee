@@ -112,8 +112,8 @@ func New(base swarm.Address, streamer p2p.StreamerDisconnecter, storer storage.P
 		pushLast:  make(map[string]*lastPush),
 		pushPeers:  make(map[string]*pushPeer),
 	}
-	ps.logger.Tracef("pushCSV,status,bits,elapsed,peer,chunk,distance")
-	ps.logger.Tracef("pushCSV,myAddr,,,%s", base.String())
+	ps.logger.Debugf("pushCSV,status,bits,elapsed,peer,chunk,distance")
+	ps.logger.Debugf("pushCSV,myAddr,,,%s", base.String())
 	return ps
 }
 
@@ -175,7 +175,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 			tooSoon = time.Since(last.when) < last.next
 			if !tooSoon {
 				last.count++
-				ps.logger.Tracef("pushsync: tooSoon allowing %d after %s/%s chunk %s", last.count, time.Since(last.when), last.next, chunk.Address().String())
+				ps.logger.Debugf("pushsync: tooSoon allowing %d after %s/%s chunk %s", last.count, time.Since(last.when), last.next, chunk.Address().String())
 				last.next *= 2	// Double the duration with each retry
 				last.when = time.Now()
 			}
@@ -436,13 +436,13 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, tmo time.
 			thisPeerElapsed := time.Since(thisPeerStart)
 			sharedBits := swarm.ExtendedProximity(ch.Address().Bytes(), peer.Bytes())
 			distance, _ := swarm.Distance(ch.Address().Bytes(), peer.Bytes())
-			ps.logger.Tracef("pushCSV,success,%d,%s,%s,%s,%s", sharedBits, thisPeerElapsed, peer.String(), ch.Address().String(), distance)
+			ps.logger.Debugf("pushCSV,success,%d,%s,%s,%s,%s", sharedBits, thisPeerElapsed, peer.String(), ch.Address().String(), distance)
 		}
 		
 		ps.pushMtx.Lock()
 		if ps.pushPeers[chunkString].pushErrors[peerString].failures > 0 {
 			ps.pushPeers[chunkString].pushErrors[peerString].clears++
-			ps.logger.Tracef("pushsync[%d/%d]:chunk %s cleared (%d) skip (%d/%d) peer %s", i+1, maxPeers, ch.Address().String(), ps.pushPeers[chunkString].pushErrors[peerString].clears, ps.pushPeers[chunkString].pushErrors[peerString].skips, ps.pushPeers[chunkString].pushErrors[peerString].failures, peer.String())
+			ps.logger.Debugf("pushsync[%d/%d]:chunk %s cleared (%d) skip (%d/%d) peer %s", i+1, maxPeers, ch.Address().String(), ps.pushPeers[chunkString].pushErrors[peerString].clears, ps.pushPeers[chunkString].pushErrors[peerString].skips, ps.pushPeers[chunkString].pushErrors[peerString].failures, peer.String())
 			ps.pushPeers[chunkString].pushErrors[peerString].failures = 0
 			ps.pushPeers[chunkString].pushErrors[peerString].lastUsed = time.Now()
 		}

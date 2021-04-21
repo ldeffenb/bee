@@ -54,9 +54,9 @@ func (db *DB) set(mode storage.ModeSet, addrs ...swarm.Address) (err error) {
 	totalTimeMetric(db.metrics.BatchLockWaitTimeSet, startLock)
 	defer func(waitTime time.Duration, start time.Time) {
 		if len(addrs) == 1 {
-			db.logger.Debugf("set(%s) %d chunks waited %s executed %s %s", mode.String(), len(addrs), waitTime, time.Since(start), addrs[0].String())
+			db.logger.Tracef("set(%s) %d chunks waited %s executed %s %s", mode.String(), len(addrs), waitTime, time.Since(start), addrs[0].String())
 		} else {
-			db.logger.Debugf("set(%s) %d chunks waited %s executed %s", mode.String(), len(addrs), waitTime, time.Since(start))
+			db.logger.Tracef("set(%s) %d chunks waited %s executed %s", mode.String(), len(addrs), waitTime, time.Since(start))
 		}
 	}(time.Since(startLock), time.Now())
 	defer totalTimeMetric(db.metrics.BatchLockHeldTimeSet, time.Now())
@@ -153,10 +153,10 @@ func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address, mode storage.Mod
 			// no need to update gc index
 			// just delete from the push index
 			// if it is there
-			db.logger.Tracef("localstore:setSync: chunk with address %s stored %d ErrNotFound removed from push index", swarm.NewAddress(item.Address).String(), item.StoreTimestamp)
+			db.logger.Debugf("localstore:setSync: chunk with address %s stored %d ErrNotFound removed from push index", swarm.NewAddress(item.Address).String(), item.StoreTimestamp)
 			err = db.pushIndex.DeleteInBatch(batch, item)
 			if err != nil {
-				db.logger.Tracef("localstore:setSync: chunk with address %s stored %d ErrNotFound NOT removed from push index, %v", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, err)
+				db.logger.Debugf("localstore:setSync: chunk with address %s stored %d ErrNotFound NOT removed from push index, %v", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, err)
 				return 0, err
 			}
 			return 0, nil
@@ -173,8 +173,7 @@ func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address, mode storage.Mod
 			// we handle this error internally, since this is an internal inconsistency of the indices
 			// this error can happen if the chunk is put with ModePutRequest or ModePutSync
 			// but this function is called with ModeSetSync
-			db.logger.Tracef("localstore:setSync: chunk with address %s stored %d not found in push index", swarm.NewAddress(item.Address).String(), item.StoreTimestamp)
-			db.logger.Debugf("localstore: chunk with address %s stored %d not found in push index", addr, item.StoreTimestamp)
+			db.logger.Debugf("localstore:setSync: chunk with address %s stored %d not found in push index", swarm.NewAddress(item.Address).String(), item.StoreTimestamp)
 		} else {
 			return 0, err
 		}
@@ -195,7 +194,7 @@ func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address, mode storage.Mod
 
 	err = db.pushIndex.DeleteInBatch(batch, item)
 	if err != nil {
-		db.logger.Tracef("localstore:setSync: chunk with address %s stored %d NOT removed from push index, %v", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, err)
+		db.logger.Debugf("localstore:setSync: chunk with address %s stored %d NOT removed from push index, %v", swarm.NewAddress(item.Address).String(), item.StoreTimestamp, err)
 		return 0, err
 	}
 

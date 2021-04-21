@@ -77,10 +77,10 @@ func (db *DB) SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, stop fun
 
 if item.StoreTimestamp != dataItem.StoreTimestamp {
 //  time="2021-03-14T23:34:40-04:00" level=trace msg="SubscribePush:chunk 7f0dbfb20a72e8a9428db8cb3fd7d434cd99367c46bdab510807ea847d585541 itemStore 1615497608968722427 != 1615678745853085663 dataItem.Store"
-	db.logger.Tracef("SubscribePush:chunk %s itemStore %d != %d dataItem.Store now %d", swarm.NewAddress(item.Address), item.StoreTimestamp, dataItem.StoreTimestamp, now())
+	db.logger.Debugf("SubscribePush:chunk %s itemStore %d != %d dataItem.Store now %d", swarm.NewAddress(item.Address), item.StoreTimestamp, dataItem.StoreTimestamp, now())
 	return false, nil
 } else {
-	db.logger.Tracef("SubscribePush:chunk %s itemStore %d == %d now %d", swarm.NewAddress(item.Address), item.StoreTimestamp, dataItem.StoreTimestamp, now())
+	//db.logger.Tracef("SubscribePush:chunk %s itemStore %d == %d now %d", swarm.NewAddress(item.Address), item.StoreTimestamp, dataItem.StoreTimestamp, now())
 }
 					select {
 					case chunks <- swarm.NewChunk(swarm.NewAddress(dataItem.Address), dataItem.Data).WithTagID(item.Tag):
