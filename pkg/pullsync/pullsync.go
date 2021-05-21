@@ -140,6 +140,10 @@ func (s *Syncer) Protocol() p2p.ProtocolSpec {
 // provide less chunks than requested.
 func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64, depth uint8) (topmost uint64, ruid uint32, err error) {
 
+	if from == 0 {	// Intervals should start with 1!
+		from = 1
+	}
+
 	s.metrics.SyncConcurrency1.Inc()
 	defer s.metrics.SyncConcurrency1.Dec()
 
@@ -215,7 +219,7 @@ s.logger.Debugf("pullsync:SyncInterval:Offer got %d Ruid:%d bin:%d %d-%d/%d for 
 	// empty interval (no chunks present in interval).
 	// return the end of the requested range as topmost.
 	if len(offer.Hashes) == 0 {
-s.logger.Tracef("pullsync:SyncInterval:ZERO Offer Ruid:%d bin:%d %d-%d/%d for %s", int(ru.Ruid), int(bin), from, to, offer.Topmost, peer.String())
+s.logger.Debugf("pullsync:SyncInterval:DONE %d/%d Chunks Ruid:%d bin:%d %d-%d/%d for %s", 0, len(offer.Hashes)/swarm.HashSize, int(ru.Ruid), int(bin), from, to, offer.Topmost, peer.String())
 		return offer.Topmost, ru.Ruid, nil
 	}
 

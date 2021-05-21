@@ -88,7 +88,7 @@ func (t *transactionService) Send(ctx context.Context, request *TxRequest) (txHa
 		return common.Hash{}, err
 	}
 
-	tx, err := prepareTransaction(ctx, request, t.sender, t.backend, nonce)
+	tx, err := t.prepareTransaction(ctx, request, t.sender, t.backend, nonce)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -153,7 +153,7 @@ func (t *transactionService) WaitForReceipt(ctx context.Context, txHash common.H
 }
 
 // prepareTransaction creates a signable transaction based on a request.
-func prepareTransaction(ctx context.Context, request *TxRequest, from common.Address, backend Backend, nonce uint64) (tx *types.Transaction, err error) {
+func (t *transactionService) prepareTransaction(ctx context.Context, request *TxRequest, from common.Address, backend Backend, nonce uint64) (tx *types.Transaction, err error) {
 	var gasLimit uint64
 	if request.GasLimit == 0 {
 		gasLimit, err = backend.EstimateGas(ctx, ethereum.CallMsg{
@@ -178,8 +178,11 @@ func prepareTransaction(ctx context.Context, request *TxRequest, from common.Add
 	} else {
 		gasPrice = request.GasPrice
 	}
-	gasPrice = new(big.Int).SetUint64(1000000000)	// Slam to 1 gwei
-	
+	var deltaPrice = new(big.Int).Div(gasPrice, big.NewInt(10))
+	gasPrice.Add(gasPrice, deltaPrice)	// Go up by 10%
+	//gasPrice.Mul(gasPrice, big.NewInt(2)) // new(big.Int).SetUint64(10)))	// Use 110% of proposed price
+	t.logger.Debugf("using %s gas price for transaction", gasPrice.Text(10))
+
 	if request.To != nil {
 		return types.NewTransaction(
 			nonce,

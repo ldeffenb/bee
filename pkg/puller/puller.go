@@ -350,6 +350,10 @@ func (p *Puller) syncPeerBin(ctx context.Context, syncCtx *syncPeer, peer swarm.
 }
 
 func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uint8, cur uint64) {
+
+	logHist := logMore
+	logHist = true
+	
 	defer func() {
 		p.wg.Done()
 		p.metrics.HistWorkerDoneCounter.Inc()
@@ -357,55 +361,55 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 	p.metrics.HistWorkerConcurrency.Inc()
 	defer p.metrics.HistWorkerConcurrency.Dec()
 
-	if logMore {
+	if logHist {
 		p.logger.Tracef("histSyncWorker starting, peer %s bin %d cursor %d", peer, bin, cur)
 	}
 	for {
 		p.metrics.HistWorkerIterCounter.Inc()
 		select {
 		case <-p.quit:
-			if logMore {
+			if logHist {
 				p.logger.Tracef("histSyncWorker quitting on shutdown. peer %s bin %d cur %d", peer, bin, cur)
 			}
 			return
 		case <-ctx.Done():
-			if logMore {
+			if logHist {
 				p.logger.Tracef("histSyncWorker context cancelled. peer %s bin %d cur %d", peer, bin, cur)
 			}
 			return
 		default:
 		}
 
-		s, _, _, err := p.nextPeerInterval(peer, bin)
+		s, _, _, err := p.nextPeerInterval(peer, bin, logHist)
 		if err != nil {
 			p.metrics.HistWorkerErrCounter.Inc()
 			p.logger.Debugf("histSyncWorker nextPeerInterval: %v", err)
 			return
 		}
 		if s > cur {
-			if logMore {
-				p.logger.Tracef("histSyncWorker finished syncing bin %d, cursor %d", bin, cur)
+			if logHist {
+				p.logger.Tracef("histSyncWorker finished syncing peer %s bin %d, cursor %d", peer, bin, cur)
 			}
 			return
 		}
 		top, ruid, err := p.syncer.SyncInterval(ctx, peer, bin, s, cur, p.topology.NeighborhoodDepth())
 		if err != nil {
-			if logMore {
+			if logHist {
 				p.logger.Debugf("histSyncWorker error syncing interval. peer %s, bin %d, cursor %d, err %v", peer.String(), bin, cur, err)
 			}
 			if ruid == 0 {
 				p.metrics.HistWorkerErrCounter.Inc()
 				return
 			}
-			if err := p.syncer.CancelRuid(ctx, peer, ruid); err != nil && logMore {
+			if err := p.syncer.CancelRuid(ctx, peer, ruid); err != nil && logHist {
 				p.logger.Debugf("histSyncWorker cancel ruid: %v", err)
 			}
 			return
 		}
-		err = p.addPeerInterval(peer, bin, s, top)
+		err = p.addPeerInterval(peer, bin, s, top, logHist)
 		if err != nil {
 			p.metrics.HistWorkerErrCounter.Inc()
-			p.logger.Errorf("could not persist interval for peer %s, quitting", peer)
+			p.logger.Errorf("could not persist interval for peer %s bin %d, quitting", peer, bin)
 			return
 		}
 	}
@@ -448,7 +452,7 @@ func (p *Puller) liveSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 			}
 			return
 		}
-		err = p.addPeerInterval(peer, bin, from, top)
+		err = p.addPeerInterval(peer, bin, from, top, logMore)
 		if err != nil {
 			p.metrics.LiveWorkerErrCounter.Inc()
 			p.logger.Errorf("liveSyncWorker exit on add peer interval. peer %s bin %d from %d err %v", peer, bin, from, err)
@@ -483,33 +487,43 @@ func (p *Puller) Close() error {
 	return nil
 }
 
-func (p *Puller) addPeerInterval(peer swarm.Address, bin uint8, start, end uint64) (err error) {
+func (p *Puller) addPeerInterval(peer swarm.Address, bin uint8, start, end uint64, logit bool) (err error) {
 	p.intervalMtx.Lock()
 	defer p.intervalMtx.Unlock()
 
 	peerStreamKey := peerIntervalKey(peer, bin)
-	i, err := p.getOrCreateInterval(peer, bin)
+	i, err := p.getOrCreateInterval(peer, bin, logit)
 	if err != nil {
+		p.logger.Tracef("addPeerInterval:bin %d peer %s err %v", bin, peer, err)
 		return err
 	}
-	i.Add(start, end)
+	if logit {
+		p.logger.Tracef("addPeerInterval:adding bin %d %d-%d to peer %s", bin, start, end, peer)
+	}
+	i.Add(start, end, p.logger)
 	return p.statestore.Put(peerStreamKey, i)
 }
 
-func (p *Puller) nextPeerInterval(peer swarm.Address, bin uint8) (start, end uint64, empty bool, err error) {
+func (p *Puller) nextPeerInterval(peer swarm.Address, bin uint8, logit bool) (start, end uint64, empty bool, err error) {
 	p.intervalMtx.Lock()
 	defer p.intervalMtx.Unlock()
 
-	i, err := p.getOrCreateInterval(peer, bin)
+	i, err := p.getOrCreateInterval(peer, bin, logit)
 	if err != nil {
+		p.logger.Tracef("nextPeerInterval:bin %d peer %s err %v", bin, peer, err)
 		return 0, 0, false, err
 	}
+	
+	p.logger.Tracef("nextPeerInterval:bin %d peer %s Intervals=%s", bin, peer, i.String())
 
-	start, end, empty = i.Next(0)
+	start, end, empty = i.Next(0, p.logger)
+	if logit {
+		p.logger.Tracef("nextPeerInterval:returning bin %d %d-%d empty:%t to peer %s", bin, start, end, empty, peer)
+	}
 	return start, end, empty, nil
 }
 
-func (p *Puller) getOrCreateInterval(peer swarm.Address, bin uint8) (*intervalstore.Intervals, error) {
+func (p *Puller) getOrCreateInterval(peer swarm.Address, bin uint8, logit bool) (*intervalstore.Intervals, error) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	// check that an interval entry exists
@@ -520,12 +534,20 @@ func (p *Puller) getOrCreateInterval(peer swarm.Address, bin uint8) (*intervalst
 	case nil:
 	case storage.ErrNotFound:
 		// key interval values are ALWAYS > 0
+		if logit {
+			p.logger.Tracef("getOrCreateInterval:NEW bin %d peer %s", bin, peer)
+		}
 		i = intervalstore.NewIntervals(1)
 		if err := p.statestore.Put(key, i); err != nil {
+			p.logger.Tracef("getOrCreateInterval:NEW bin %d peer %s err %v", bin, peer, err)
 			return nil, err
 		}
 	default:
+		p.logger.Tracef("getOrCreateInterval:get bin %d peer %s err %v", bin, peer, err)
 		return nil, fmt.Errorf("get peer interval: %w", err)
+	}
+	if logit {
+		p.logger.Tracef("getOrCreateInterval:existing bin %d peer %s", bin, peer)
 	}
 	return i, nil
 }

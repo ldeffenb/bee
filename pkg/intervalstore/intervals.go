@@ -24,8 +24,12 @@ package intervalstore
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
+	
+	"github.com/ethersphere/bee/pkg/logging"
+
 )
 
 // Intervals store a list of intervals. Its purpose is to provide
@@ -54,24 +58,48 @@ func NewIntervals(start uint64) *Intervals {
 
 // Add adds a new range to intervals. Range start and end are values
 // are both inclusive.
-func (i *Intervals) Add(start, end uint64) {
+func (i *Intervals) Add(start, end uint64, logger  logging.Logger) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	
+	i.check(logger)
 
-	i.add(start, end)
+	i.add(start, end, logger)
 }
 
-func (i *Intervals) add(start, end uint64) {
+func (i *Intervals) check(logger logging.Logger) {
+	if len(i.ranges) > 1 {
+		deleted := 0
+		for j := 0; j < len(i.ranges); j++ {
+			if i.ranges[j][0] == math.MaxUint64 || i.ranges[j][1] == math.MaxUint64 {
+				if deleted == 0 {
+					logger.Tracef("getOrCreateInterval:PURGing %d-%d", i.ranges[j][0], i.ranges[j][1])
+				}
+				deleted++
+				i.ranges = append(i.ranges[:j], i.ranges[j+1:]...)
+				j--	// Recheck [j]
+			}
+		}
+		if deleted > 0 {
+			logger.Tracef("getOrCreateInterval:PURGed %d interval ranges, %d left Now %s", deleted, len(i.ranges), i.String())
+		}
+	}
+}
+
+func (i *Intervals) add(start, end uint64, logger  logging.Logger) {
+	logger.Tracef("Intervals:add i.start=%d add %d-%d", i.start, start, end)
 	if start < i.start {
 		start = i.start
 	}
 	if end < i.start {
+		logger.Tracef("Intervals:add i.start=%d add %d-%d short-circuit END return", i.start, start, end)
 		return
 	}
 	minStartJ := -1
 	maxEndJ := -1
 	j := 0
 	for ; j < len(i.ranges); j++ {
+		logger.Tracef("Intervals:add i.start=%d add %d-%d Range[%d] %d-%d", i.start, start, end, j, i.ranges[j][0], i.ranges[j][1])
 		if minStartJ < 0 {
 			if (start <= i.ranges[j][0] && end+1 >= i.ranges[j][0]) || (start <= i.ranges[j][1]+1 && end+1 >= i.ranges[j][1]) {
 				if i.ranges[j][0] < start {
@@ -91,30 +119,35 @@ func (i *Intervals) add(start, end uint64) {
 		}
 	}
 	if minStartJ < 0 && maxEndJ < 0 {
+		logger.Tracef("Intervals:add i.start=%d add %d-%d added new return", i.start, start, end)
 		i.ranges = append(i.ranges[:j], append([][2]uint64{{start, end}}, i.ranges[j:]...)...)
 		return
 	}
 	if minStartJ >= 0 {
+		logger.Tracef("Intervals:add i.start=%d add %d-%d re-start[%d] was %d", i.start, start, end, minStartJ, i.ranges[minStartJ][0])
 		i.ranges[minStartJ][0] = start
 	}
 	if maxEndJ >= 0 {
+		logger.Tracef("Intervals:add i.start=%d add %d-%d re-end[%d] was %d", i.start, start, end, maxEndJ, i.ranges[minStartJ][1])
 		i.ranges[maxEndJ][1] = end
 	}
 	if minStartJ >= 0 && maxEndJ >= 0 && minStartJ != maxEndJ {
+		logger.Tracef("Intervals:add i.start=%d add %d-%d new-start-end[%d-%d]", i.start, start, end, minStartJ, maxEndJ)
 		i.ranges[maxEndJ][0] = start
 		i.ranges = append(i.ranges[:minStartJ], i.ranges[maxEndJ:]...)
 	}
+	logger.Tracef("Intervals:add done i.start=%d add %d-%d", i.start, start, end)
 }
 
 // Merge adds all the intervals from the m Interval to current one.
-func (i *Intervals) Merge(m *Intervals) {
+func (i *Intervals) Merge(m *Intervals, logger  logging.Logger ) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
 	for _, r := range m.ranges {
-		i.add(r[0], r[1])
+		i.add(r[0], r[1], logger)
 	}
 }
 
@@ -129,16 +162,18 @@ func (i *Intervals) Merge(m *Intervals) {
 // Returned empty boolean indicates if both start and end values have
 // reached the ceiling value which means that the returned range is empty,
 // not containing a single element.
-func (i *Intervals) Next(ceiling uint64) (start, end uint64, empty bool) {
+func (i *Intervals) Next(ceiling uint64, logger  logging.Logger) (start, end uint64, empty bool) {
 	i.mu.RLock()
 	defer func() {
 		if ceiling > 0 {
 			var ceilingHitStart, ceilingHitEnd bool
 			if start > ceiling {
+				logger.Tracef("Intervals:Next override start %d ceiling=%d returning %d-%d", start, ceiling, ceiling, end)
 				start = ceiling
 				ceilingHitStart = true
 			}
 			if end == 0 || end > ceiling {
+				logger.Tracef("Intervals:Next override end %d ceiling=%d returning %d-%d", end, ceiling, start, ceiling)
 				end = ceiling
 				ceilingHitEnd = true
 			}
@@ -147,16 +182,22 @@ func (i *Intervals) Next(ceiling uint64) (start, end uint64, empty bool) {
 		i.mu.RUnlock()
 	}()
 
+	i.check(logger)
+
 	l := len(i.ranges)
 	if l == 0 {
+		logger.Tracef("Intervals:Next no ranges, returning %d-0", i.start)
 		return i.start, 0, false
 	}
 	if i.ranges[0][0] != i.start {
+		logger.Tracef("Intervals:Next range[0]=%d-%d, returning %d-%d", i.ranges[0][0], i.ranges[0][1], i.start, i.ranges[0][0]-1)
 		return i.start, i.ranges[0][0] - 1, false
 	}
 	if l == 1 {
+		logger.Tracef("Intervals:Next l==1 range[0]=%d-%d, returning %d-%d", i.ranges[0][0], i.ranges[0][1], i.ranges[0][1]+1, 0)
 		return i.ranges[0][1] + 1, 0, false
 	}
+	logger.Tracef("Intervals:Next range[0]=%d-%d range[1]=%d-%d, returning %d-%d", i.ranges[0][0], i.ranges[0][1], i.ranges[1][0], i.ranges[1][1], i.ranges[0][1]+1, i.ranges[1][0]-1)
 	return i.ranges[0][1] + 1, i.ranges[1][0] - 1, false
 }
 
