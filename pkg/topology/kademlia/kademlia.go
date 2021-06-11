@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/big"
 	"math/bits"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -30,7 +31,7 @@ import (
 
 const (
 	nnLowWatermark         = 2 // the number of peers in consecutive deepest bins that constitute as nearest neighbours
-	maxConnAttempts        = 1 // when there is maxConnAttempts failed connect calls for a given peer it is considered non-connectable
+	maxConnAttempts        = 2 // when there is maxConnAttempts failed connect calls for a given peer it is considered non-connectable
 	maxBootNodeAttempts    = 3 // how many attempts to dial to boot-nodes before giving up
 	defaultBitSuffixLength = 3 // the number of bits used to create pseudo addresses for balancing
 
@@ -95,6 +96,12 @@ type Kad struct {
 	wg                sync.WaitGroup
 	waitNext          *waitnext.WaitNext
 	metrics           metrics
+
+	closerMtx sync.Mutex
+	closerPeers map[string]string
+	
+	peersLoaded bool
+	peersDumped bool
 }
 
 // New returns a new Kademlia.
@@ -140,6 +147,8 @@ func New(
 		done:              make(chan struct{}),
 		wg:                sync.WaitGroup{},
 		metrics:           newMetrics(),
+
+		closerPeers:       make(map[string]string),
 	}
 
 	if k.bitSuffixLength > 0 {
@@ -378,6 +387,147 @@ func (k *Kad) connectNeighbours(wg *sync.WaitGroup, peerConnChan, peerConnChan2 
 	})
 }
 
+// connectCloserPeers attempts to connect to peers closer to a specific target chunk
+func (k *Kad) connectCloserPeers(wg *sync.WaitGroup, peerConnChan, peerConnChan2 chan<- *peerConnInfo) {
+
+	if len(k.closerPeers) == 0 {
+		return	// Nothing to do here yet
+	}
+	start := time.Now()
+	k.closerMtx.Lock()
+	pendingPeers := k.closerPeers
+	k.closerPeers = make(map[string]string)
+	k.closerMtx.Unlock()
+
+	attemptedCount := 0
+	// for each pending peer
+	for peerAddrString, chunkAddrString := range pendingPeers {
+
+		peer := swarm.MustParseHexAddress(peerAddrString)
+
+		k.logger.Debugf("closer connecting to %s for %s", peer.String(), chunkAddrString)
+
+		if k.connectedPeers.Exists(peer) {
+			continue
+		}
+
+		po := swarm.Proximity(k.base.Bytes(), peer.Bytes())
+
+		select {
+		case <-k.quit:
+			return	// Time to get outa Dodge!
+		default:
+			wg.Add(1)
+			peerConnChan <- &peerConnInfo{
+				po:   uint8(po),
+				addr: peer,
+			}
+		}
+
+		attemptedCount++
+	}
+	k.logger.Debugf("kademlia closer connector took %s to finish, attempted %d", time.Since(start), attemptedCount)
+}
+
+// connectRandomNeighbours attempts to connect to the neighbours
+// which were not considered by the connectBalanced method.
+func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConnChan2 chan<- *peerConnInfo) {
+
+	var deckOfPeers [][]swarm.Address
+	sourceRandom := rand.NewSource(time.Now().Unix())
+	dealRandom:= rand.New(sourceRandom) // initialize local pseudorandom generator 
+
+	deckCount := 0
+	deckStart := time.Now()
+//	connectedPO := uint8(swarm.MaxPO*2);
+	dumpPeers := k.peersLoaded && !k.peersDumped
+	if dumpPeers {
+		k.logger.Tracef("kademlia:bin[] dumping peers")
+		dumpPeers = false
+		k.peersDumped = true
+		k.logger.Tracef("kademlia:bin[] NOT dumping peers")
+	}
+	
+	_ = k.knownPeers.EachBinRev(func(addr swarm.Address, po uint8) (bool, bool, error) {
+
+		if dumpPeers {
+			k.logger.Tracef("kademlia:bin[%d] peer %s", int(po), addr.String())
+		}
+
+		if k.connectedPeers.Exists(addr) {
+			return false, false, nil
+		}
+
+		if k.waitNext.Waiting(addr) {
+			//k.metrics.TotalBeforeExpireWaits.Inc()
+			return false, false, nil
+		}
+		
+		if len(deckOfPeers) <= int(po) {
+			if po >= 0 {
+				if len(k.connectedPeers.BinPeers(po)) > (saturationPeers*2 + (32-int(po))) {
+					return false, true, nil // bin is saturated, skip to next bin
+				}
+			}
+		}
+
+		for len(deckOfPeers) <= int(po) {
+			deckOfPeers = append(deckOfPeers, nil)
+		}
+		deckOfPeers[po] = append(deckOfPeers[po], addr)
+		deckCount++
+		select {
+		case <-k.quit:
+			return true, false, nil
+		default:
+		}
+		
+		// the bin could be saturated or not, so a decision cannot
+		// be made before checking the next peer, so we iterate to next
+		return false, false, nil
+	})
+	k.logger.Debugf("kademlia took %s to build deck of %d peers", time.Since(deckStart), deckCount)
+	if dumpPeers {
+		k.peersDumped = true
+		k.logger.Tracef("kademlia:bin[] peers dumped")
+	}
+
+	const multiplePeerThreshold = 8
+
+	for po := 0; po < len(deckOfPeers); po++ {
+		if (len(deckOfPeers[po]) > 0) {
+			k.logger.Tracef("kademlia:connect: bin %d has %d peers", int(po), len(deckOfPeers[po]))
+		}
+		sent := 0
+		for q := 0; q < len(deckOfPeers[po]); q++ {
+
+			peerIndex := dealRandom.Intn(len(deckOfPeers[po]))
+			addr := deckOfPeers[po][peerIndex]
+			
+			deckOfPeers[po][peerIndex] = deckOfPeers[po][len(deckOfPeers[po])-1] // Copy last element to peerIndex.
+			deckOfPeers[po][len(deckOfPeers[po])-1] = swarm.Address{}   // Erase last element (write zero value).
+			deckOfPeers[po] = deckOfPeers[po][:len(deckOfPeers[po])-1]   // Truncate slice
+
+//			depth := k.NeighborhoodDepth()
+
+			select {
+			case <-k.quit:
+				return	// Time to get outa Dodge!
+			default:
+				wg.Add(1)
+				peerConnChan <- &peerConnInfo{
+					po:   uint8(po),
+					addr: addr,
+				}
+				sent++
+			}
+			if (sent > (saturationPeers*2 + (32-po))) {
+				break	// Sent enough, go to next bin
+			}
+		}
+	}
+}
+
 // connectionAttemptsHandler handles the connection attempts
 // to peers sent by the producers to the peerConnChan.
 func (k *Kad) connectionAttemptsHandler(ctx context.Context, wg *sync.WaitGroup, peerConnChan, peerConnChan2 <-chan *peerConnInfo) {
@@ -531,7 +681,9 @@ func (k *Kad) manage() {
 			}
 
 			oldDepth := k.NeighborhoodDepth()
-			k.connectNeighbours(&wg, peerConnChan, peerConnChan2)
+			k.connectCloserPeers(&wg, peerConnChan, peerConnChan)
+			k.connectRandomNeighbours(&wg, peerConnChan, peerConnChan)
+			//k.connectNeighbours(&wg, peerConnChan, peerConnChan2)
 			k.connectBalanced(&wg, peerConnChan2)
 			wg.Wait()
 
@@ -584,8 +736,11 @@ func (k *Kad) Start(_ context.Context) error {
 			k.logger.Errorf("addressbook overlays: %w", err)
 			return
 		}
+		loadSince := time.Since(start)
+		addStart := time.Now()
 		k.AddPeers(addresses...)
 		k.metrics.StartAddAddressBookOverlaysTime.Observe(float64(time.Since(start).Nanoseconds()))
+		k.logger.Infof("kademlia addressBook took %s to load, %s to add %d addresses", loadSince, time.Since(addStart), len(addresses))
 	}()
 
 	return nil
@@ -837,6 +992,10 @@ func (k *Kad) Announce(ctx context.Context, peer swarm.Address, fullnode bool) e
 // be made to the peer.
 func (k *Kad) AddPeers(addrs ...swarm.Address) {
 	k.knownPeers.Add(addrs...)
+	if len(addrs) > 10000 {
+		k.peersLoaded = true
+		k.logger.Tracef("kademlia:bin[] %d peers loaded", len(addrs))
+	}
 	k.notifyManageLoop()
 }
 
@@ -931,6 +1090,53 @@ func (k *Kad) notifyPeerSig() {
 		select {
 		case c <- struct{}{}:
 		default:
+		}
+	}
+}
+
+func (k *Kad) ConnectCloserPeer(addr swarm.Address, closerThan swarm.Address) {
+	spf := func(peer swarm.Address) bool {
+		if k.connectedPeers.Exists(peer) {
+			return true
+		}
+		if k.waitNext.Waiting(addr) {
+			//k.metrics.TotalBeforeExpireWaits.Inc()
+			return true
+		}
+		return false
+	}
+	closerKnownPeer, err := closestPeer(k.knownPeers, addr, spf)
+	if err != nil {
+		k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s, err %v", addr.String(), closerThan.String(), err)
+	} else { 
+// DistanceCmp compares x and y to a in terms of the distance metric defined in the swarm specfication.
+// it returns:
+// 	1 if x is closer to a than y
+// 	0 if x and y are equally far apart from a (this means that x and y are the same address)
+// 	-1 if x is farther from a than y
+// Fails if not all addresses are of equal length.
+//func DistanceCmp(a, x, y []byte) (int, error) {
+		cmp, err := swarm.DistanceCmp(addr.Bytes(), closerKnownPeer.Bytes(), closerThan.Bytes())
+		if err != nil {
+		} else {
+			if cmp != 1 {
+				k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s NOT(%d) %s", addr.String(), closerThan.String(), cmp, closerKnownPeer.String())
+			} else {
+
+				k.closerMtx.Lock()
+				defer k.closerMtx.Unlock()
+				if _, ok := k.closerPeers[closerKnownPeer.String()]; !ok {
+					k.logger.Debugf("kademlia:ConnectCloserPeer closer to %s than %s NEW %s", addr.String(), closerThan.String(), closerKnownPeer.String())
+					k.closerPeers[closerKnownPeer.String()] = addr.String()
+					k.logger.Tracef("kademlia ConnectCloserPeer kicking manageC")
+					select {
+					case k.manageC <- struct{}{}:
+					default:
+					}
+				} else {
+					k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s pending %s", addr.String(), closerThan.String(), closerKnownPeer.String())
+				}
+			}
 		}
 	}
 }
@@ -1296,7 +1502,9 @@ func (k *Kad) Close() error {
 	if err := k.collector.Finalize(time.Now()); err != nil {
 		k.logger.Debugf("kademlia: unable to finalize open sessions: %v", err)
 	}
+	k.logger.Info("kademlia persisted peer metrics")
 
+	k.logger.Info("kademlia done shutting down")
 	return nil
 }
 
