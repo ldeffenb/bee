@@ -429,6 +429,8 @@ func (k *Kad) connectCloserPeers(wg *sync.WaitGroup, peerConnChan, peerConnChan2
 	k.logger.Debugf("kademlia closer connector took %s to finish, attempted %d", time.Since(start), attemptedCount)
 }
 
+=======
+>>>>>>> 2138dc7b... Implement connectRandomNeighbours
 // connectRandomNeighbours attempts to connect to the neighbours
 // which were not considered by the connectBalanced method.
 func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConnChan2 chan<- *peerConnInfo) {
