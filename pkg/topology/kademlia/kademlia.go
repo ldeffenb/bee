@@ -414,6 +414,7 @@ func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConn
 		
 		if len(deckOfPeers) <= int(po) {
 			if len(k.connectedPeers.BinPeers(po)) > (saturationPeers*2 + (32-int(po))) {
+			//if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); saturated {
 				return false, true, nil // bin is saturated, skip to next bin
 			}
 		}
