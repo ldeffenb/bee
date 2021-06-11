@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/big"
 	"math/bits"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -378,6 +379,101 @@ func (k *Kad) connectNeighbours(wg *sync.WaitGroup, peerConnChan, peerConnChan2 
 	})
 }
 
+// connectRandomNeighbours attempts to connect to the neighbours
+// which were not considered by the connectBalanced method.
+func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConnChan2 chan<- *peerConnInfo) {
+
+	var deckOfPeers [][]swarm.Address
+	sourceRandom := rand.NewSource(time.Now().Unix())
+	dealRandom:= rand.New(sourceRandom) // initialize local pseudorandom generator 
+
+	deckCount := 0
+	deckStart := time.Now()
+//	connectedPO := uint8(swarm.MaxPO*2);
+//	dumpPeers := k.peersLoaded && !k.peersDumped
+//	if dumpPeers {
+//		dumpPeers = false
+//		k.peersDumped = true
+//		k.logger.Tracef("kademlia:bin[] dumping peers")
+//	}
+	
+	_ = k.knownPeers.EachBinRev(func(addr swarm.Address, po uint8) (bool, bool, error) {
+
+//		if dumpPeers {
+//			k.logger.Tracef("kademlia:bin[%d] peer %s", int(po), addr.String())
+//		}
+
+		if k.connectedPeers.Exists(addr) {
+			return false, false, nil
+		}
+
+		if k.waitNext.Waiting(addr) {
+			//k.metrics.TotalBeforeExpireWaits.Inc()
+			return false, false, nil
+		}
+		
+		if len(deckOfPeers) <= int(po) {
+			if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); saturated {
+				return false, true, nil // bin is saturated, skip to next bin
+			}
+		}
+
+		for len(deckOfPeers) <= int(po) {
+			deckOfPeers = append(deckOfPeers, nil)
+		}
+		deckOfPeers[po] = append(deckOfPeers[po], addr)
+		deckCount++
+		select {
+		case <-k.quit:
+			return true, false, nil
+		default:
+		}
+		
+		// the bin could be saturated or not, so a decision cannot
+		// be made before checking the next peer, so we iterate to next
+		return false, false, nil
+	})
+	k.logger.Debugf("kademlia took %s to build deck of %d peers", time.Since(deckStart), deckCount)
+//	if dumpPeers {
+//		k.peersDumped = true
+//		k.logger.Tracef("kademlia:bin[] peers dumped")
+//	}
+
+	const multiplePeerThreshold = 8
+
+	sent := 0
+	
+	for po := 0; po < len(deckOfPeers); po++ {
+		k.logger.Tracef("kademlia:connect: bin %d has %d peers", int(po), len(deckOfPeers[po]))
+		for q := 0; q < len(deckOfPeers[po]); q++ {
+
+			peerIndex := dealRandom.Intn(len(deckOfPeers[po]))
+			addr := deckOfPeers[po][peerIndex]
+			
+			deckOfPeers[po][peerIndex] = deckOfPeers[po][len(deckOfPeers[po])-1] // Copy last element to peerIndex.
+			deckOfPeers[po][len(deckOfPeers[po])-1] = swarm.Address{}   // Erase last element (write zero value).
+			deckOfPeers[po] = deckOfPeers[po][:len(deckOfPeers[po])-1]   // Truncate slice
+
+//			depth := k.NeighborhoodDepth()
+
+			select {
+			case <-k.quit:
+				return	// Time to get outa Dodge!
+			default:
+				wg.Add(1)
+				peerConnChan <- &peerConnInfo{
+					po:   uint8(po),
+					addr: addr,
+				}
+				sent++
+			}
+			if (sent > (saturationPeers*2 + (32-po))) {
+				break	// Sent enough, go to next bin
+			}
+		}
+	}
+}
+
 // connectionAttemptsHandler handles the connection attempts
 // to peers sent by the producers to the peerConnChan.
 func (k *Kad) connectionAttemptsHandler(ctx context.Context, wg *sync.WaitGroup, peerConnChan, peerConnChan2 <-chan *peerConnInfo) {
@@ -531,7 +627,8 @@ func (k *Kad) manage() {
 			}
 
 			oldDepth := k.NeighborhoodDepth()
-			k.connectNeighbours(&wg, peerConnChan, peerConnChan2)
+			k.connectRandomNeighbours(&wg, peerConnChan, peerConnChan)
+			//k.connectNeighbours(&wg, peerConnChan, peerConnChan2)
 			k.connectBalanced(&wg, peerConnChan2)
 			wg.Wait()
 
