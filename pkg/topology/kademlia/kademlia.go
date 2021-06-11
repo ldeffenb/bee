@@ -453,7 +453,6 @@ func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConn
 		if dumpPeers {
 			k.logger.Tracef("kademlia:bin[%d] peer %s", int(po), addr.String())
 		}
-
 		if k.connectedPeers.Exists(addr) {
 			return false, false, nil
 		}
