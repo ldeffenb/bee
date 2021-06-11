@@ -413,7 +413,7 @@ func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConn
 		}
 		
 		if len(deckOfPeers) <= int(po) {
-			if saturated, _ := k.saturationFunc(po, k.knownPeers, k.connectedPeers); saturated {
+			if len(k.connectedPeers.BinPeers(po)) > (saturationPeers*2 + (32-int(po))) {
 				return false, true, nil // bin is saturated, skip to next bin
 			}
 		}
@@ -444,7 +444,9 @@ func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConn
 	sent := 0
 	
 	for po := 0; po < len(deckOfPeers); po++ {
-		k.logger.Tracef("kademlia:connect: bin %d has %d peers", int(po), len(deckOfPeers[po]))
+		if (len(deckOfPeers[po]) > 0) {
+			k.logger.Tracef("kademlia:connect: bin %d has %d peers", int(po), len(deckOfPeers[po]))
+		}
 		for q := 0; q < len(deckOfPeers[po]); q++ {
 
 			peerIndex := dealRandom.Intn(len(deckOfPeers[po]))
@@ -681,8 +683,11 @@ func (k *Kad) Start(_ context.Context) error {
 			k.logger.Errorf("addressbook overlays: %w", err)
 			return
 		}
+		loadSince = time.Since(start)
+		addStart := time.Now()
 		k.AddPeers(addresses...)
 		k.metrics.StartAddAddressBookOverlaysTime.Observe(float64(time.Since(start).Nanoseconds()))
+		k.logger.Infof("kademlia addressBook took %s to load, %s to add %d addresses", loadSince, time.Since(addStart), len(addresses))
 	}()
 
 	return nil
