@@ -287,6 +287,9 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 		allowedRetries = maxPeers
 	}
 
+	haveLastAddress := false
+	lastAddress := swarm.ZeroAddress
+
 	for i := maxAttempts; allowedRetries > 0 && i > 0; i-- {
 		// find the next closest peer
 		peer, err := ps.topologyDriver.ClosestPeer(ch.Address(), includeSelf, skipPeers...)
@@ -328,6 +331,8 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 		}
 
 		ps.metrics.TotalSendAttempts.Inc()
+		lastAddress = peer
+		haveLastAddress = true
 
 		go func(peer swarm.Address, ch swarm.Chunk) {
 			ctxd, canceld := context.WithTimeout(ctx, defaultTTL)
@@ -370,7 +375,9 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 			return nil, ctx.Err()
 		}
 	}
-
+	if haveLastAddress {
+		ps.topologyDriver.ConnectCloserPeer(ch.Address(), lastAddress)
+	}
 	return nil, ErrNoPush
 }
 
