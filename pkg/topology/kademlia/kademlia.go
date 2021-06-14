@@ -728,7 +728,6 @@ func (k *Kad) Start(_ context.Context) error {
 			return
 		default:
 		}
-
 		start := time.Now()
 		addresses, err := k.addressBook.Overlays()
 		if err != nil {
