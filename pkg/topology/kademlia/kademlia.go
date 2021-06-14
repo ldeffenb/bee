@@ -742,7 +742,6 @@ func (k *Kad) Start(_ context.Context) error {
 		k.metrics.StartAddAddressBookOverlaysTime.Observe(float64(time.Since(start).Nanoseconds()))
 		k.logger.Infof("kademlia addressBook took %s to load, %s to add %d addresses", loadSince, time.Since(addStart), len(addresses))
 	}()
-
 	// trigger the first manage loop immediately so that
 	// we can start connecting to the bootnode quickly
 	k.notifyManageLoop()
