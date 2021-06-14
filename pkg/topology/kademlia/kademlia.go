@@ -429,8 +429,6 @@ func (k *Kad) connectCloserPeers(wg *sync.WaitGroup, peerConnChan, peerConnChan2
 	k.logger.Debugf("kademlia closer connector took %s to finish, attempted %d", time.Since(start), attemptedCount)
 }
 
-=======
->>>>>>> 2138dc7b... Implement connectRandomNeighbours
 // connectRandomNeighbours attempts to connect to the neighbours
 // which were not considered by the connectBalanced method.
 func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConnChan2 chan<- *peerConnInfo) {
@@ -744,19 +742,6 @@ func (k *Kad) Start(_ context.Context) error {
 		k.metrics.StartAddAddressBookOverlaysTime.Observe(float64(time.Since(start).Nanoseconds()))
 		k.logger.Infof("kademlia addressBook took %s to load, %s to add %d addresses", loadSince, time.Since(addStart), len(addresses))
 	}()
-	loadStart := time.Now()
-	addresses, err := k.addressBook.Overlays()
-	if err != nil {
-		return fmt.Errorf("addressbook overlays: %w", err)
-	}
-	
-	addStart := time.Now()
-	k.AddPeers(addresses...)
-	
-	k.logger.Infof("kademlia addressBook took %s to load, %s to add %d addresses", time.Since(loadStart), time.Since(addStart), len(addresses))
->>>>>>> a5976d13... Connect to even more peers in lower bins; suppress bin information if empty.
->>>>>>> 3be12d77... Connect to even more peers in lower bins; suppress bin information if empty.
-
 	return nil
 }
 
