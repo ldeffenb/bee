@@ -487,7 +487,6 @@ func (k *Kad) connectRandomNeighbours(wg *sync.WaitGroup, peerConnChan, peerConn
 		return false, false, nil
 	})
 	k.logger.Debugf("kademlia took %s to build deck of %d peers", time.Since(deckStart), deckCount)
-
 	if dumpPeers {
 		k.peersDumped = true
 		k.logger.Tracef("kademlia:bin[] peers dumped")
