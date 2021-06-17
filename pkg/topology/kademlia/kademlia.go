@@ -737,7 +737,7 @@ func (k *Kad) Start(_ context.Context) error {
 			k.logger.Errorf("addressbook overlays: %w", err)
 			return
 		}
-		loadSince = time.Since(start)
+		loadSince := time.Since(start)
 		addStart := time.Now()
 		k.AddPeers(addresses...)
 		k.metrics.StartAddAddressBookOverlaysTime.Observe(float64(time.Since(start).Nanoseconds()))
