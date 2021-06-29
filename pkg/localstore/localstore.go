@@ -252,7 +252,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 		withinRadiusFn = withinRadius
 	}
 
-	db.shed, err = shed.NewDB(path, shedOpts)
+	db.shed, err = shed.NewDB(path, shedOpts, logger)
 	if err != nil {
 		return nil, err
 	}
