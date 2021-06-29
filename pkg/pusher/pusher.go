@@ -45,7 +45,7 @@ type Service struct {
 
 var (
 	retryInterval  = 5 * time.Second // time interval between retries
-	concurrentJobs = 10              // how many chunks to push simultaneously
+	concurrentJobs = 100              // how many chunks to push simultaneously
 	retryCount     = 6
 )
 
@@ -220,6 +220,7 @@ LOOP:
 							mtx.Unlock()
 							err = fmt.Errorf("pusher: shallow receipt depth %d, want at least %d", po, d)
 							s.metrics.ShallowReceiptDepth.WithLabelValues(strconv.Itoa(int(po))).Inc()
+							s.depther.ConnectCloserPeer(ch.Address(), storerPeer)
 							return
 						}
 						mtx.Unlock()
