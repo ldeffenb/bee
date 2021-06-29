@@ -97,6 +97,9 @@ type Kad struct {
 	wg                sync.WaitGroup
 	waitNext          *waitnext.WaitNext
 	metrics           metrics
+	
+	closerMtx sync.Mutex
+	closerPeers map[string]string
 }
 
 // New returns a new Kademlia.
@@ -141,6 +144,8 @@ func New(
 		done:              make(chan struct{}),
 		wg:                sync.WaitGroup{},
 		metrics:           newMetrics(),
+		
+		closerPeers:       make(map[string]string),
 	}
 
 	if k.bitSuffixLength > 0 {
@@ -378,6 +383,50 @@ func (k *Kad) connectNeighbours(wg *sync.WaitGroup, peerConnChan, peerConnChan2 
 	})
 }
 
+// connectCloserPeers attempts to connect to peers closer to a specific target chunk
+func (k *Kad) connectCloserPeers(wg *sync.WaitGroup, peerConnChan, peerConnChan2 chan<- *peerConnInfo) {
+
+	k.logger.Debugf("connectCloserPeers: %d pending", len(k.closerPeers))
+
+	if len(k.closerPeers) == 0 {
+		return	// Nothing to do here yet
+	}
+	start := time.Now()
+	k.closerMtx.Lock()
+	pendingPeers := k.closerPeers
+	k.closerPeers = make(map[string]string)
+	k.closerMtx.Unlock()
+
+	attemptedCount := 0
+	// for each pending peer
+	for peerAddrString, chunkAddrString := range pendingPeers {
+
+		peer := swarm.MustParseHexAddress(peerAddrString)
+
+		k.logger.Debugf("closer connecting to %s for %s", peer.String(), chunkAddrString)
+
+		if k.connectedPeers.Exists(peer) {
+			continue
+		}
+
+		po := swarm.Proximity(k.base.Bytes(), peer.Bytes())
+
+		select {
+		case <-k.quit:
+			return	// Time to get outa Dodge!
+		default:
+			wg.Add(1)
+			peerConnChan <- &peerConnInfo{
+				po:   uint8(po),
+				addr: peer,
+			}
+		}
+
+		attemptedCount++
+	}
+	k.logger.Debugf("kademlia closer connector took %s to finish, attempted %d", time.Since(start), attemptedCount)
+}
+
 // connectionAttemptsHandler handles the connection attempts
 // to peers sent by the producers to the peerConnChan.
 func (k *Kad) connectionAttemptsHandler(ctx context.Context, wg *sync.WaitGroup, peerConnChan, peerConnChan2 <-chan *peerConnInfo) {
@@ -500,21 +549,32 @@ func (k *Kad) manage() {
 	peerConnChan := make(chan *peerConnInfo)
 	peerConnChan2 := make(chan *peerConnInfo)
 	go k.connectionAttemptsHandler(ctx, &wg, peerConnChan, peerConnChan2)
-
+	
+	lastLoop := time.Now()
+	lastFlush := time.Now()
+	
 	for {
 		select {
 		case <-k.quit:
 			return
 		case <-time.After(15 * time.Second):
 			start := time.Now()
+			k.logger.Debugf("kademlia connector took %s between flushes", time.Since(lastFlush))
+			lastFlush = time.Now()
+
 			if err := k.collector.Flush(); err != nil {
 				k.metrics.InternalMetricsFlushTotalErrors.Inc()
-				k.logger.Debugf("kademlia: unable to flush metrics counters to the persistent store: %v", err)
+				k.logger.Debugf("kademlia: took %s unable to flush metrics counters to the persistent store: %v", time.Since(start), err)
 			} else {
 				k.metrics.InternalMetricsFlushTime.Observe(float64(time.Since(start).Nanoseconds()))
+				k.logger.Debugf("kademlia connector took %s to flush", time.Since(start))
 			}
 			k.notifyManageLoop()
 		case <-k.manageC:
+		
+			k.logger.Debugf("kademlia connector took %s between notifies", time.Since(lastLoop))
+			lastLoop = time.Now()
+
 			start := time.Now()
 
 			select {
@@ -527,8 +587,16 @@ func (k *Kad) manage() {
 			}
 
 			oldDepth := k.NeighborhoodDepth()
+			k.connectCloserPeers(&wg, peerConnChan, peerConnChan)
 			k.connectNeighbours(&wg, peerConnChan, peerConnChan2)
 			k.connectBalanced(&wg, peerConnChan2)
+
+			k.logger.Tracef(
+				"kademlia: connector took %s to connect: old depth %d; new depth %d",
+				time.Since(start),
+				oldDepth,
+				k.depth,
+			)
 			wg.Wait()
 
 			k.depthMu.Lock()
@@ -946,6 +1014,53 @@ func (k *Kad) notifyPeerSig() {
 	}
 }
 
+func (k *Kad) ConnectCloserPeer(addr swarm.Address, closerThan swarm.Address) {
+	spf := func(peer swarm.Address) bool {
+		if k.connectedPeers.Exists(peer) {
+			return true
+		}
+		if k.waitNext.Waiting(addr) {
+			//k.metrics.TotalBeforeExpireWaits.Inc()
+			return true
+		}
+		return false
+	}
+	closerKnownPeer, err := closestPeer(k.knownPeers, addr, spf)
+	if err != nil {
+		k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s, err %v", addr.String(), closerThan.String(), err)
+	} else { 
+// DistanceCmp compares x and y to a in terms of the distance metric defined in the swarm specfication.
+// it returns:
+// 	1 if x is closer to a than y
+// 	0 if x and y are equally far apart from a (this means that x and y are the same address)
+// 	-1 if x is farther from a than y
+// Fails if not all addresses are of equal length.
+//func DistanceCmp(a, x, y []byte) (int, error) {
+		cmp, err := swarm.DistanceCmp(addr.Bytes(), closerKnownPeer.Bytes(), closerThan.Bytes())
+		if err != nil {
+		} else {
+			if cmp != 1 {
+				k.logger.Tracef("kademlia:ConnectCloserPeer closer to %s than %s NOT(%d) %s", addr.String(), closerThan.String(), cmp, closerKnownPeer.String())
+			} else {
+
+				k.closerMtx.Lock()
+				defer k.closerMtx.Unlock()
+				if _, ok := k.closerPeers[closerKnownPeer.String()]; !ok {
+					k.closerPeers[closerKnownPeer.String()] = addr.String()
+					k.logger.Debugf("kademlia:ConnectCloserPeer(%d) closer to %s than %s NEW %s", len(k.closerPeers), addr.String(), closerThan.String(), closerKnownPeer.String())
+					k.logger.Tracef("kademlia ConnectCloserPeer kicking manageC")
+					select {
+					case k.manageC <- struct{}{}:
+					default:
+					}
+				} else {
+					k.logger.Tracef("kademlia:ConnectCloserPeer(%d) closer to %s than %s pending %s", len(k.closerPeers), addr.String(), closerThan.String(), closerKnownPeer.String())
+				}
+			}
+		}
+	}
+}
+
 func closestPeer(peers *pslice.PSlice, addr swarm.Address, spf sanctionedPeerFunc) (swarm.Address, error) {
 	closest := swarm.ZeroAddress
 	err := peers.EachBinRev(func(peer swarm.Address, po uint8) (bool, bool, error) {
@@ -1303,10 +1418,12 @@ func (k *Kad) Close() error {
 		k.logger.Warning("kademlia manage loop did not shut down properly")
 	}
 
+	persistStart := time.Now();
 	k.logger.Info("kademlia persisting peer metrics")
 	if err := k.collector.Finalize(time.Now()); err != nil {
 		k.logger.Debugf("kademlia: unable to finalize open sessions: %v", err)
 	}
+	k.logger.Infof("kademlia persisting peer metrics took %s", time.Since(persistStart))
 
 	return nil
 }
