@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethersphere/bee/pkg/logging"
 	"github.com/ethersphere/bee/pkg/shed"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/hashicorp/go-multierror"
@@ -163,8 +164,8 @@ type Counters struct {
 }
 
 // flush writes the current state of in memory counters into the given db.
-func (cs *Counters) flush(db *shed.DB, batch *leveldb.Batch) error {
-	if cs.dirty.Load() > 1 {
+func (cs *Counters) flush(db *shed.DB, batch *leveldb.Batch, logger logging.Logger) error {
+	if cs.dirty.Load() < 3 {
 		return nil
 	}
 	cs.dirty.CAS(3, 2)
@@ -180,6 +181,7 @@ func (cs *Counters) flush(db *shed.DB, batch *leveldb.Batch) error {
 	ls, ok := cs.persistentLastSeenTimestamp.Load().(*shed.Uint64Field)
 	if !ok {
 		mk := newPeerKey(peerLastSeenTimestamp, key)
+		logger.Tracef("collector:flush:New key %s", mk.String())
 		field, err := db.NewUint64Field(mk.String())
 		if err != nil {
 			return fmt.Errorf("field initialization for %q failed: %w", mk, err)
@@ -191,6 +193,7 @@ func (cs *Counters) flush(db *shed.DB, batch *leveldb.Batch) error {
 	cd, ok := cs.persistentConnTotalDuration.Load().(*shed.Uint64Field)
 	if !ok {
 		mk := newPeerKey(peerTotalConnectionDuration, key)
+		logger.Tracef("collector:flush:New key %s", mk.String())
 		field, err := db.NewUint64Field(mk.String())
 		if err != nil {
 			return fmt.Errorf("field initialization for %q failed: %w", mk, err)
@@ -199,6 +202,7 @@ func (cs *Counters) flush(db *shed.DB, batch *leveldb.Batch) error {
 		cs.persistentConnTotalDuration.Store(cd)
 	}
 
+	logger.Tracef("collector:flush:putInBatches %s", key)
 	ls.PutInBatch(batch, uint64(lastSeenTimestampSnapshot))
 	cd.PutInBatch(batch, uint64(connectionTotalDurationSnapshot))
 
@@ -229,14 +233,15 @@ func (cs *Counters) snapshot(t time.Time) *Snapshot {
 }
 
 // NewCollector is a convenient constructor for creating new Collector.
-func NewCollector(db *shed.DB) *Collector {
-	return &Collector{db: db}
+func NewCollector(db *shed.DB, logger logging.Logger) *Collector {
+	return &Collector{db: db, logger: logger}
 }
 
 // Collector collects various metrics about
 // peers specified be the swarm.Address.
 type Collector struct {
 	db       *shed.DB
+	logger   logging.Logger // logger
 	counters sync.Map
 }
 
@@ -296,14 +301,20 @@ func (c *Collector) Flush(addresses ...swarm.Address) error {
 		dirty []string
 		batch = new(leveldb.Batch)
 	)
-
+	
+	counterCount := 0
+	c.counters.Range(func(_, val interface{}) bool { counterCount++; return true } )
+	c.logger.Tracef("Collector:Flush:Flushing %d/%d addresses", len(addresses), counterCount)
+	start := time.Now()
+	
 	for _, addr := range addresses {
 		val, ok := c.counters.Load(addr.ByteString())
 		if !ok {
 			continue
 		}
 		cs := val.(*Counters)
-		if err := cs.flush(c.db, batch); err != nil {
+		c.logger.Tracef("Collector:Flush:Flushing peer %q", addr)
+		if err := cs.flush(c.db, batch, c.logger); err != nil {
 			mErr = multierror.Append(mErr, fmt.Errorf("unable to batch the counters of peer %q for flash: %w", addr, err))
 			continue
 		}
@@ -313,7 +324,8 @@ func (c *Collector) Flush(addresses ...swarm.Address) error {
 	if len(addresses) == 0 {
 		c.counters.Range(func(_, val interface{}) bool {
 			cs := val.(*Counters)
-			if err := cs.flush(c.db, batch); err != nil {
+			//c.logger.Tracef("Collector:Flush:Flushing peer %q", cs.peer)
+			if err := cs.flush(c.db, batch, c.logger); err != nil {
 				mErr = multierror.Append(mErr, fmt.Errorf("unable to batch the counters of peer %q for flash: %w", cs.peer, err))
 				return true
 			}
@@ -322,6 +334,7 @@ func (c *Collector) Flush(addresses ...swarm.Address) error {
 		})
 	}
 
+	c.logger.Tracef("Collector:Flush:Writing %d batches", batch.Len())
 	if batch.Len() == 0 {
 		return mErr
 	}
@@ -329,6 +342,7 @@ func (c *Collector) Flush(addresses ...swarm.Address) error {
 		mErr = multierror.Append(mErr, fmt.Errorf("unable to persist counters in batch: %w", err))
 	}
 
+	c.logger.Tracef("Collector:Flush:Reloading %d dirties", len(dirty))
 	for _, addr := range dirty {
 		val, ok := c.counters.Load(addr)
 		if !ok {
@@ -338,6 +352,7 @@ func (c *Collector) Flush(addresses ...swarm.Address) error {
 		cs.dirty.CAS(1, 0)
 	}
 
+	c.logger.Tracef("Collector:Flush:Flush took %s", time.Since(start))
 	return mErr
 }
 
@@ -349,26 +364,36 @@ func (c *Collector) Finalize(t time.Time) error {
 		batch = new(leveldb.Batch)
 	)
 
+	counterCount := 0
+	c.counters.Range(func(_, val interface{}) bool { counterCount++; return true } )
+	c.logger.Tracef("Collector:Finalize:Finalizing %d counters", counterCount)
+	start := time.Now()
+	
 	c.counters.Range(func(_, val interface{}) bool {
 		cs := val.(*Counters)
+		//c.logger.Tracef("Collector:Finalize:Logout peer %q", cs.peer)
 		PeerLogOut(t)(cs)
-		if err := cs.flush(c.db, batch); err != nil {
+		//c.logger.Tracef("Collector:Finalize:flush peer %q", cs.peer)
+		if err := cs.flush(c.db, batch, c.logger); err != nil {
 			mErr = multierror.Append(mErr, fmt.Errorf("unable to flush counters for peer %q: %w", cs.peer, err))
 		}
 		return true
 	})
 
+	c.logger.Tracef("Collector:Finalize:Writing %d batches", batch.Len())
 	if batch.Len() > 0 {
 		if err := c.db.WriteBatch(batch); err != nil {
 			mErr = multierror.Append(mErr, fmt.Errorf("unable to persist counters in batch: %w", err))
 		}
 	}
 
+	c.logger.Tracef("Collector:Finalize:Deleting counters")
 	c.counters.Range(func(_, val interface{}) bool {
 		cs := val.(*Counters)
 		c.counters.Delete(cs.peer.ByteString())
 		return true
 	})
 
+	c.logger.Tracef("Collector:Finalize:Finalize took %s", time.Since(start))
 	return mErr
 }

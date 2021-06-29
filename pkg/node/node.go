@@ -495,7 +495,7 @@ func NewBee(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, netwo
 
 	var swapService *swap.Service
 
-	metricsDB, err := shed.NewDBWrap(stateStore.DB())
+	metricsDB, err := shed.NewDBWrap(stateStore.DB(), logger)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create metrics storage for kademlia: %w", err)
 	}
