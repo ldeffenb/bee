@@ -138,7 +138,7 @@ func New(
 		logger:            logger,
 		standalone:        o.StandaloneMode,
 		bootnode:          o.BootnodeMode,
-		collector:         im.NewCollector(metricsDB),
+		collector:         im.NewCollector(metricsDB, logger),
 		quit:              make(chan struct{}),
 		halt:              make(chan struct{}),
 		done:              make(chan struct{}),

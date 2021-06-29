@@ -25,6 +25,8 @@ package shed
 import (
 	"errors"
 
+	"github.com/ethersphere/bee/pkg/logging"
+
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -50,15 +52,17 @@ type Options struct {
 // It provides a schema functionality to store fields and indexes
 // information about naming and types.
 type DB struct {
+	logger logging.Logger
 	ldb     *leveldb.DB
 	metrics metrics
+	sch		*schema
 	quit    chan struct{} // Quit channel to stop the metrics collection before closing the database
 }
 
 // NewDB constructs a new DB and validates the schema
 // if it exists in database on the given path.
 // metricsPrefix is used for metrics collection for the given DB.
-func NewDB(path string, o *Options) (db *DB, err error) {
+func NewDB(path string, o *Options, logger logging.Logger) (db *DB, err error) {
 	if o == nil {
 		o = &Options{
 			OpenFilesLimit:         defaultOpenFilesLimit,
@@ -83,19 +87,21 @@ func NewDB(path string, o *Options) (db *DB, err error) {
 		return nil, err
 	}
 
-	return NewDBWrap(ldb)
+	return NewDBWrap(ldb, logger)
 }
 
 // NewDBWrap returns new DB which uses the given ldb as its underlying storage.
 // The function will panics if the given ldb is nil.
-func NewDBWrap(ldb *leveldb.DB) (db *DB, err error) {
+func NewDBWrap(ldb *leveldb.DB, logger logging.Logger) (db *DB, err error) {
 	if ldb == nil {
 		panic(errors.New("shed: NewDBWrap: nil ldb"))
 	}
 
 	db = &DB{
+		logger: logger,
 		ldb:     ldb,
 		metrics: newMetrics(),
+		sch: nil,
 	}
 
 	if _, err = db.getSchema(); err != nil {
