@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 var (
@@ -147,20 +148,30 @@ func (db *DB) schemaIndexPrefix(name string) (id byte, err error) {
 // getSchema retrieves the complete schema from
 // the database.
 func (db *DB) getSchema() (s schema, err error) {
+	if db.sch != nil {
+		return *db.sch, nil
+	}
+	start := time.Now()
 	b, err := db.Get(keySchema)
 	if err != nil {
 		return s, err
 	}
 	err = json.Unmarshal(b, &s)
+	db.logger.Tracef("getSchema took %s to get %d bytes", time.Since(start), len(b))
+	db.sch = &s
 	return s, err
 }
 
 // putSchema stores the complete schema to
 // the database.
 func (db *DB) putSchema(s schema) (err error) {
+	start := time.Now()
+	db.sch = &s
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	return db.Put(keySchema, b)
+	err = db.Put(keySchema, b)
+	db.logger.Tracef("putSchema took %s to put %d bytes", time.Since(start), len(b))
+	return err
 }
