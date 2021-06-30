@@ -169,13 +169,13 @@ LOOP:
 						s.metrics.SyncTime.Observe(time.Since(startTime).Seconds())
 						// only print this if there was no error while sending the chunk
 						po := swarm.Proximity(ch.Address().Bytes(), storerPeer.Bytes())
-						logger.Tracef("pusher: pushed chunk %s to node %s, receipt depth %d", ch.Address().String(), storerPeer.String(), po)
+						logger.Tracef("pusher: pushed chunk %s to %s in %s, depth %d", ch.Address().String(), storerPeer.String(), time.Since(startTime), po)
 						s.metrics.ReceiptDepth.WithLabelValues(strconv.Itoa(int(po))).Inc()
 						delete(retryCounter, ch.Address().ByteString())
 					} else {
 						s.metrics.TotalErrors.Inc()
 						s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
-						logger.Tracef("pusher: cannot push chunk %s: %v", ch.Address().String(), err)
+						logger.Tracef("pusher: cannot push chunk %s in %s: %v", ch.Address().String(), time.Since(startTime), err)
 					}
 					delete(inflight, ch.Address().String())
 					mtx.Unlock()
