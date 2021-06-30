@@ -78,7 +78,8 @@ type PushSync struct {
 	skipList       *peerSkipList
 }
 
-var defaultTTL = 20 * time.Second                     // request time to live
+var defaultTTL = 10 * time.Second                     // request time to live
+var timeToWaitForFirstReceipt = 30 * time.Second	  // time to wait to get a receipt for the first push
 var timeToWaitForPushsyncToNeighbor = 3 * time.Second // time to wait to get a receipt for a chunk
 var nPeersToPushsync = 3                              // number of peers to replicate to as receipt is sent upstream
 
@@ -203,7 +204,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 	span, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-handler", ps.logger, opentracing.Tag{Key: "address", Value: chunk.Address().String()})
 	defer span.Finish()
 
-	receipt, err := ps.pushToClosest(ctx, chunk, false, p.Address)
+	receipt, err := ps.pushToClosest(ctx, chunk, false, p.Address, defaultTTL)
 	if err != nil {
 		if errors.Is(err, topology.ErrWantSelf) {
 			if !storedChunk {
@@ -254,7 +255,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 // a receipt from that peer and returns error or nil based on the receiving and
 // the validity of the receipt.
 func (ps *PushSync) PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Receipt, error) {
-	r, err := ps.pushToClosest(ctx, ch, true, swarm.ZeroAddress)
+	r, err := ps.pushToClosest(ctx, ch, true, swarm.ZeroAddress, timeToWaitForFirstReceipt)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +271,7 @@ type pushResult struct {
 	attempted bool
 }
 
-func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllowed bool, origin swarm.Address) (*pb.Receipt, error) {
+func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllowed bool, origin swarm.Address, tmo time.Duration) (*pb.Receipt, error) {
 	span, logger, ctx := ps.tracer.StartSpanFromContext(ctx, "push-closest", ps.logger, opentracing.Tag{Key: "address", Value: ch.Address().String()})
 	defer span.Finish()
 	defer ps.skipList.PruneExpired()
@@ -335,8 +336,9 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 		haveLastAddress = true
 
 		go func(peer swarm.Address, ch swarm.Chunk) {
-			ctxd, canceld := context.WithTimeout(ctx, defaultTTL)
+			ctxd, canceld := context.WithTimeout(ctx, tmo)
 			defer canceld()
+			startPush := time.Now()
 
 			r, attempted, err := ps.pushPeer(ctxd, peer, ch, retryAllowed)
 			// attempted is true if we get past accounting and actually attempt
@@ -346,7 +348,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 				allowedRetries--
 			}
 			if err != nil {
-				logger.Debugf("could not push to peer %s: %v", peer, err)
+				logger.Debugf("could not push to peer %s in %s: %v", peer, time.Since(startPush), err)
 				resultC <- &pushResult{err: err, attempted: attempted}
 				return
 			}
@@ -358,6 +360,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, retryAllo
 
 		select {
 		case r := <-resultC:
+			tmo = defaultTTL	// reset the timeout for subsequent attempts
 			// receipt received for chunk
 			if r.receipt != nil {
 				ps.skipList.PruneChunk(ch.Address())
