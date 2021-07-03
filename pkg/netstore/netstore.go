@@ -48,7 +48,7 @@ func (s *store) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Addres
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			// request from network
-			ch, err = s.retrieval.RetrieveChunk(ctx, addr, true)
+			ch, _, err = s.retrieval.RetrieveChunk(ctx, addr, true)
 			if err != nil {
 				targets := sctx.GetTargets(ctx)
 				if targets == nil || s.recoveryCallback == nil {

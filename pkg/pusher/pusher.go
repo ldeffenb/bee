@@ -20,6 +20,7 @@ import (
 	"github.com/ethersphere/bee/pkg/crypto"
 	"github.com/ethersphere/bee/pkg/logging"
 	"github.com/ethersphere/bee/pkg/pushsync"
+	"github.com/ethersphere/bee/pkg/retrieval"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/tags"
@@ -32,6 +33,7 @@ import (
 
 type Service struct {
 	networkID         uint64
+	retrieval         retrieval.Interface
 	storer            storage.Storer
 	pushSyncer        pushsync.PushSyncer
 	depther           topology.NeighborhoodDepther
@@ -54,9 +56,10 @@ var (
 	ErrShallowReceipt = errors.New("shallow recipt")
 )
 
-func New(networkID uint64, storer storage.Storer, depther topology.NeighborhoodDepther, pushSyncer pushsync.PushSyncer, tagger *tags.Tags, logger logging.Logger, tracer *tracing.Tracer, warmupTime time.Duration) *Service {
+func New(networkID uint64, retriever retrieval.Interface, storer storage.Storer, depther topology.NeighborhoodDepther, pushSyncer pushsync.PushSyncer, tagger *tags.Tags, logger logging.Logger, tracer *tracing.Tracer, warmupTime time.Duration) *Service {
 	service := &Service{
 		networkID:         networkID,
+		retrieval:		   retriever,
 		storer:            storer,
 		pushSyncer:        pushSyncer,
 		depther:           depther,
@@ -163,6 +166,18 @@ LOOP:
 					storerPeer swarm.Address
 				)
 				defer func() {
+					if err != nil {
+						startRetrieve := time.Now()
+						logger.Tracef("pusher: attempting retrieve chunk %s after %v", ch.Address().String(), err)
+						_, peer, err2 := s.retrieval.RetrieveChunk(ctx, ch.Address(), false)
+						if err2 == nil {
+							logger.Tracef("pusher: retrieve chunk %s succeeded in %s after %v", ch.Address().String(), time.Since(startRetrieve), err)
+							storerPeer = peer
+							err = nil
+						} else {
+							logger.Tracef("pusher: retrieve chunk %s failed in %s: %v", ch.Address().String(), time.Since(startRetrieve), err2)
+						}
+					}
 					mtx.Lock()
 					if err == nil {
 						s.metrics.TotalSynced.Inc()
