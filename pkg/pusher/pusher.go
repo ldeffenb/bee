@@ -163,21 +163,9 @@ LOOP:
 					startTime  = time.Now()
 					t          *tags.Tag
 					wantSelf   bool
-					storerPeer swarm.Address
+					storerPeer = swarm.ZeroAddress
 				)
 				defer func() {
-					if err != nil {
-						startRetrieve := time.Now()
-						logger.Tracef("pusher: attempting retrieve chunk %s after %v", ch.Address().String(), err)
-						_, peer, err2 := s.retrieval.RetrieveChunk(ctx, ch.Address(), false)
-						if err2 == nil {
-							logger.Tracef("pusher: retrieve chunk %s succeeded in %s after %v", ch.Address().String(), time.Since(startRetrieve), err)
-							storerPeer = peer
-							err = nil
-						} else {
-							logger.Tracef("pusher: retrieve chunk %s failed in %s: %v", ch.Address().String(), time.Since(startRetrieve), err2)
-						}
-					}
 					mtx.Lock()
 					if err == nil {
 						s.metrics.TotalSynced.Inc()
@@ -208,7 +196,17 @@ LOOP:
 						// connected to other nodes, but is the closest one to the chunk.
 						wantSelf = true
 					} else {
-						return
+						startRetrieve := time.Now()
+						logger.Tracef("pusher: attempting retrieve chunk %s after %v", ch.Address().String(), err)
+						_, peer, err2 := s.retrieval.RetrieveChunk(ctx, ch.Address(), false)
+						if err2 == nil {
+							logger.Tracef("pusher: retrieve chunk %s succeeded in %s after %v", ch.Address().String(), time.Since(startRetrieve), err)
+							storerPeer = peer
+							err = nil
+						} else {
+							logger.Tracef("pusher: retrieve chunk %s failed in %s: %v", ch.Address().String(), time.Since(startRetrieve), err2)
+							return
+						}
 					}
 				}
 
@@ -225,7 +223,9 @@ LOOP:
 						err = fmt.Errorf("pusher: receipt storer address: %w", err)
 						return
 					}
+				}
 
+				if !storerPeer.IsZero() {
 					po := swarm.Proximity(ch.Address().Bytes(), storerPeer.Bytes())
 					d := s.depther.NeighborhoodDepth()
 					if po < d {
@@ -243,7 +243,7 @@ LOOP:
 						s.metrics.ReceiptDepth.WithLabelValues(strconv.Itoa(int(po))).Inc()
 					}
 				}
-
+				
 				if err = s.storer.Set(ctx, storage.ModeSetSync, ch.Address()); err != nil {
 					err = fmt.Errorf("pusher: set sync: %w", err)
 					return
