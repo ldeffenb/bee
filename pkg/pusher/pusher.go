@@ -166,18 +166,6 @@ LOOP:
 					storerPeer = swarm.ZeroAddress
 				)
 				defer func() {
-					if err != nil {
-						startRetrieve := time.Now()
-						logger.Tracef("pusher: attempting retrieve chunk %s after %v", ch.Address().String(), err)
-						_, peer, err2 := s.retrieval.RetrieveChunk(ctx, ch.Address(), false)
-						if err2 == nil {
-							logger.Tracef("pusher: retrieve chunk %s succeeded in %s after %v", ch.Address().String(), time.Since(startRetrieve), err)
-							storerPeer = peer
-							err = nil
-						} else {
-							logger.Tracef("pusher: retrieve chunk %s failed in %s: %v", ch.Address().String(), time.Since(startRetrieve), err2)
-						}
-					}
 					mtx.Lock()
 					if err == nil {
 						s.metrics.TotalSynced.Inc()
