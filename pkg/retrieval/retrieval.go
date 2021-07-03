@@ -43,7 +43,7 @@ const (
 var _ Interface = (*Service)(nil)
 
 type Interface interface {
-	RetrieveChunk(ctx context.Context, addr swarm.Address, origin bool) (chunk swarm.Chunk, err error)
+	RetrieveChunk(ctx context.Context, addr swarm.Address, origin bool) (chunk swarm.Chunk, peer swarm.Address, err error)
 }
 
 type retrievalResult struct {
@@ -101,7 +101,7 @@ const (
 	originSuffix                  = "_origin"
 )
 
-func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin bool) (swarm.Chunk, error) {
+func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin bool) (swarm.Chunk, swarm.Address, error) {
 	s.metrics.RequestCounter.Inc()
 
 	flightRoute := addr.String()
@@ -177,7 +177,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 						}
 						peersResults++
 					} else {
-						return res.chunk, nil
+						return res, nil
 					}
 				}
 			case <-ctx.Done():
@@ -212,7 +212,6 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 					}
 				}
 			}
-
 		}
 
 		// if we have not managed to get results after 5 (maxRequestRounds) rounds of peer selections, give up
@@ -220,10 +219,10 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 
 	})
 	if err != nil {
-		return nil, err
+		return nil, swarm.ZeroAddress, err
 	}
 
-	return v.(swarm.Chunk), nil
+	return v.(retrievalResult).chunk, v.(retrievalResult).peer, nil
 }
 
 func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *skipPeers, originated bool) (chunk swarm.Chunk, peer swarm.Address, requested bool, err error) {
@@ -414,7 +413,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			// forward the request
-			chunk, err = s.RetrieveChunk(ctx, addr, false)
+			chunk, _, err = s.RetrieveChunk(ctx, addr, false)
 			if err != nil {
 				return fmt.Errorf("retrieve chunk: %w", err)
 			}
