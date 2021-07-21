@@ -6,6 +6,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/postage"
+	"github.com/ethersphere/bee/pkg/pss"
 	"github.com/ethersphere/bee/pkg/sctx"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -155,13 +157,37 @@ func (s *server) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) chunkGetHandler(w http.ResponseWriter, r *http.Request) {
-	targets := r.URL.Query().Get("targets")
-	if targets != "" {
-		r = r.WithContext(sctx.SetTargets(r.Context(), targets))
-	}
-
 	nameOrHex := mux.Vars(r)["addr"]
 	ctx := r.Context()
+
+	targets := r.URL.Query().Get("targets")
+	if targets != "" {
+		s.logger.Debugf("chunk: get using targets %s", targets)
+		ctx = sctx.SetTargets(ctx, targets)
+		test := sctx.GetTargets(ctx)
+		if test == nil {
+			s.logger.Debugf("chunk: context LOST targets %s", targets)
+
+			prefixes := strings.Split(targets, ",")
+			var pTargets pss.Targets
+			for _, prefix := range prefixes {
+				var target pss.Target
+				target, err := hex.DecodeString(prefix)
+				if err != nil {
+					s.logger.Debugf("chunk: targets %s prefix %s failed with %v", targets, prefix, err)
+					continue
+				}
+				pTargets = append(pTargets, target)
+			}
+			if len(pTargets) <= 0 {
+				s.logger.Debugf("chunk: targets %s extracted <=0 pss.Targets", targets);
+			} else {
+				s.logger.Debugf("chunk: successfully parsed targets %s, got %d", targets, len(pTargets))
+			}
+		} else {
+			s.logger.Debugf("chunk: context HAS targets %s", targets)
+		}
+	}
 
 	address, err := s.resolveNameOrAddress(nameOrHex)
 	if err != nil {

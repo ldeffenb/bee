@@ -44,13 +44,17 @@ func NewRepairHandler(s storage.Storer, logger logging.Logger, pushSyncer pushsy
 	return func(ctx context.Context, m []byte) {
 		chAddr := m
 
+		logger.Debugf("NewRepairHandler: attempting %s (%s)", swarm.NewAddress(chAddr), chAddr)
+
 		// check if the chunk exists in the local store and proceed.
 		// otherwise the Get will trigger a unnecessary network retrieve
 		exists, err := s.Has(ctx, swarm.NewAddress(chAddr))
 		if err != nil {
+			logger.Debugf("NewRepairHandler: %s failed with %v", swarm.NewAddress(chAddr), err)
 			return
 		}
 		if !exists {
+			logger.Debugf("NewRepairHandler: %s !exists", swarm.NewAddress(chAddr))
 			return
 		}
 
@@ -67,5 +71,6 @@ func NewRepairHandler(s storage.Storer, logger logging.Logger, pushSyncer pushsy
 			logger.Tracef("chunk repair: error while sending chunk or receiving receipt: %v", err)
 			return
 		}
+		logger.Debugf("NewRepairHandler: %s (re)pushed to swarm", swarm.NewAddress(chAddr), err)
 	}
 }

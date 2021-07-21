@@ -52,8 +52,10 @@ func (s *store) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Addres
 			if err != nil {
 				targets := sctx.GetTargets(ctx)
 				if targets == nil || s.recoveryCallback == nil {
+					s.logger.Debugf("netstore.Get: no recovery for %s, %s %s", addr, targets, s.recoveryCallback)
 					return nil, err
 				}
+				s.logger.Debugf("netstore.Get: invoking recoveryCallback for %s, %s", addr, targets)
 				go s.recoveryCallback(addr, targets)
 				return nil, ErrRecoveryAttempt
 			}
