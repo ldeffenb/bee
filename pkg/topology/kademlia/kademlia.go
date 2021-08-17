@@ -517,7 +517,6 @@ func (k *Kad) manage() {
 				return
 			case <-k.quit:
 				return
-			//case <-time.After(15 * time.Second):
 			case <-time.After(5 * time.Minute):
 				start := time.Now()
 				k.logger.Debugf("kademlia took %s between flushes", time.Since(lastFlush))
@@ -529,7 +528,6 @@ func (k *Kad) manage() {
 					k.metrics.InternalMetricsFlushTime.Observe(float64(time.Since(start).Nanoseconds()))
 					k.logger.Debugf("kademlia connector took %s to flush", time.Since(start))
 				}
-				//k.notifyManageLoop()
 			}
 		}
 	}()
@@ -540,6 +538,8 @@ func (k *Kad) manage() {
 		select {
 		case <-k.quit:
 			return
+		case <-time.After(15 * time.Second):
+			k.notifyManageLoop()
 		case <-k.manageC:
 
 			k.logger.Debugf("kademlia connector took %s between notifies", time.Since(lastLoop))
