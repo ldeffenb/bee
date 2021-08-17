@@ -52,6 +52,7 @@ type Options struct {
 type DB struct {
 	ldb     *leveldb.DB
 	metrics metrics
+	sch		*schema
 	quit    chan struct{} // Quit channel to stop the metrics collection before closing the database
 }
 
@@ -96,6 +97,7 @@ func NewDBWrap(ldb *leveldb.DB) (db *DB, err error) {
 	db = &DB{
 		ldb:     ldb,
 		metrics: newMetrics(),
+		sch: nil,
 	}
 
 	if _, err = db.getSchema(); err != nil {
