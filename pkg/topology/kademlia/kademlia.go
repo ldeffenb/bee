@@ -505,21 +505,46 @@ func (k *Kad) manage() {
 	peerConnChan := make(chan *peerConnInfo)
 	peerConnChan2 := make(chan *peerConnInfo)
 	go k.connectionAttemptsHandler(ctx, &wg, peerConnChan, peerConnChan2)
+	
+	lastFlush := time.Now()
+	
+	k.wg.Add(1)
+	go func() {
+		defer k.wg.Done()
+		for {
+			select {
+			case <-k.halt:
+				return
+			case <-k.quit:
+				return
+			//case <-time.After(15 * time.Second):
+			case <-time.After(5 * time.Minute):
+				start := time.Now()
+				k.logger.Debugf("kademlia took %s between flushes", time.Since(lastFlush))
+				lastFlush = time.Now()
+				if err := k.collector.Flush(); err != nil {
+					k.metrics.InternalMetricsFlushTotalErrors.Inc()
+					k.logger.Debugf("kademlia: took %s unable to flush metrics counters to the persistent store: %v", time.Since(start), err)
+				} else {
+					k.metrics.InternalMetricsFlushTime.Observe(float64(time.Since(start).Nanoseconds()))
+					k.logger.Debugf("kademlia connector took %s to flush", time.Since(start))
+				}
+				//k.notifyManageLoop()
+			}
+		}
+	}()
+
+	lastLoop := time.Now()
 
 	for {
 		select {
 		case <-k.quit:
 			return
-		case <-time.After(15 * time.Second):
-			start := time.Now()
-			if err := k.collector.Flush(); err != nil {
-				k.metrics.InternalMetricsFlushTotalErrors.Inc()
-				k.logger.Debugf("kademlia: unable to flush metrics counters to the persistent store: %v", err)
-			} else {
-				k.metrics.InternalMetricsFlushTime.Observe(float64(time.Since(start).Nanoseconds()))
-			}
-			k.notifyManageLoop()
 		case <-k.manageC:
+
+			k.logger.Debugf("kademlia connector took %s between notifies", time.Since(lastLoop))
+			lastLoop = time.Now()
+
 			start := time.Now()
 
 			select {
