@@ -10,6 +10,9 @@ import (
 )
 
 type metrics struct {
+        TotalCursorsRequests               prometheus.Counter
+        TotalCursorsRequestsComplete       prometheus.Counter
+
 	Offered       prometheus.Counter   // number of chunks offered
 	Wanted        prometheus.Counter   // number of chunks wanted
 	Delivered     prometheus.Counter   // number of chunk deliveries
@@ -22,6 +25,20 @@ func newMetrics() metrics {
 	subsystem := "pullsync"
 
 	return metrics{
+
+                TotalCursorsRequests: prometheus.NewCounter(prometheus.CounterOpts{
+                        Namespace: m.Namespace,
+                        Subsystem: subsystem,
+                        Name:      "total_cursors_requests",
+                        Help:      "Total cursors requests.",
+                }),
+                TotalCursorsRequestsComplete: prometheus.NewCounter(prometheus.CounterOpts{
+                        Namespace: m.Namespace,
+                        Subsystem: subsystem,
+                        Name:      "total_cursors_requests_complete",
+                        Help:      "Total cursors requests completed.",
+                }),
+
 		Offered: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,

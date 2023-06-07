@@ -45,6 +45,11 @@ func (db *DB) Put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 	db.metrics.ModePut.Inc()
 	defer totalTimeMetric(db.metrics.TotalTimePut, time.Now())
 
+	if len(chs) > 0 {
+		db.logger.Debug("localstore:Put", "count", len(chs), "first", chs[0].Address())
+	} else {
+		db.logger.Debug("localstore:Put ZERO length chs!")
+	}
 	exist, err = db.put(ctx, mode, chs...)
 	if err != nil {
 		db.metrics.ModePutFailure.Inc()
@@ -165,6 +170,13 @@ func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 					db.logger.Warning("failed releasing sharky location on error", "error", err)
 				}
 			}
+			db.logger.Debug("localstore:put:defer", "retErr", retErr)
+		} else {
+			if len(chs) > 0 {
+				db.logger.Debug("localstore:put:defer success", "count", len(chs), "first", chs[0].Address())
+			} else {
+				db.logger.Debug("localstore:put:defer success ZERO len chs!")
+			}
 		}
 	}()
 
@@ -180,6 +192,7 @@ func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 				return db.putRequest(ctx, batch, binIDs, item, pin, cache, exists)
 			})
 			if err != nil {
+				db.logger.Debug("localstore:putRequest putChunk failed", "chunk", ch.Address(), "err", err)
 				return nil, fmt.Errorf("put request: %w", err)
 			}
 			exist[i] = exists
@@ -196,6 +209,7 @@ func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 				return db.putUpload(batch, binIDs, item, pin, exists)
 			})
 			if err != nil {
+				db.logger.Debug("localstore:putUpload putChunk failed", "chunk", ch.Address(), "err", err)
 				return nil, fmt.Errorf("put upload: %w", err)
 			}
 			exist[i] = exists
@@ -216,6 +230,7 @@ func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 				return db.putSync(batch, binIDs, item, exists)
 			})
 			if err != nil {
+				db.logger.Debug("localstore:putSync putChunk failed", "chunk", ch.Address(), "err", err)
 				return nil, fmt.Errorf("put sync: %w", err)
 			}
 			exist[i] = exists
@@ -381,7 +396,12 @@ func (db *DB) putRequest(
 		}
 	}
 
-	return db.setPin(batch, item)
+	pinIncrement := 1
+	if forcePin {
+		pinIncrement = 10000
+	}
+
+	return db.setPin(batch, item, uint64(pinIncrement))
 }
 
 // putUpload adds an Item to the batch by updating required indexes:
@@ -424,7 +444,7 @@ func (db *DB) putUpload(
 	}
 
 	if pin {
-		return db.setPin(batch, item)
+		return db.setPin(batch, item, 10000)
 	}
 	return 0, nil
 }
@@ -488,7 +508,7 @@ func (db *DB) putSync(
 		return 0, err
 	}
 
-	return db.setPin(batch, item)
+	return db.setPin(batch, item, 1)	// I'm not sure this should even be pinning?
 }
 
 func (db *DB) addToCache(
@@ -511,6 +531,11 @@ func (db *DB) addToCache(
 	if exists {
 		return 0, nil
 	}
+	db.logger.Debug("pinTrace:addToCache: NOT pinning po<radius or cache",
+						"chunk", swarm.NewAddress(item.Address).String(),
+						"po", db.po(swarm.NewAddress(item.Address)),
+						"radius", item.Radius,
+						"batch", swarm.NewAddress(item.BatchID).String())
 	err = db.gcIndex.PutInBatch(batch, item)
 	if err != nil {
 		return 0, err

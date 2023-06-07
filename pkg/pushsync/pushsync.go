@@ -8,6 +8,7 @@ package pushsync
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -255,6 +256,7 @@ func (ps *PushSync) PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Re
 	r, err := ps.pushToClosest(ctx, ch, true)
 	if err != nil {
 		ps.metrics.TotalOutgoingErrors.Inc()
+		ps.logger.Debug("PushChunkToClosest: failed", "chunk", ch.Address(), "batch", hex.EncodeToString(ch.Stamp().BatchID()), "err", err)
 		return nil, err
 	}
 	return &Receipt{
@@ -379,6 +381,10 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 			inflight--
 
 			ps.measurePushPeer(result.pushTime, result.err, origin)
+                        if result.err == nil {
+                                return result.receipt, nil
+                        }
+
 
 			if result.err == nil {
 				return result.receipt, nil

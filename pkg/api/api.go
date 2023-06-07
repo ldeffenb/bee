@@ -816,7 +816,7 @@ func (s *Service) newStamperPutter(r *http.Request) (storage.Storer, func() erro
 	}
 
 	if deferred {
-		p := newStoringStamperPutter(s.storer, issuer, s.signer)
+		p := newStoringStamperPutter(s.storer, issuer, s.signer, batch, s.logger)
 		return p, save, nil
 	}
 	p := newPushStamperPutter(s.logger, s.storer, issuer, s.signer, s.chunkPushC)
@@ -905,11 +905,13 @@ func (p *pushStamperPutter) putChunk(ctx context.Context, ch swarm.Chunk) {
 type stamperPutter struct {
 	storage.Storer
 	stamper postage.Stamper
+	batchID string
+	logger log.Logger
 }
 
-func newStoringStamperPutter(s storage.Storer, i *postage.StampIssuer, signer crypto.Signer) *stamperPutter {
+func newStoringStamperPutter(s storage.Storer, i *postage.StampIssuer, signer crypto.Signer, batch []byte, logger log.Logger) *stamperPutter {
 	stamper := postage.NewStamper(i, signer)
-	return &stamperPutter{Storer: s, stamper: stamper}
+	return &stamperPutter{Storer: s, stamper: stamper, batchID: hex.EncodeToString(batch), logger: logger}
 }
 
 func (p *stamperPutter) Put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk) (exists []bool, err error) {
@@ -924,6 +926,18 @@ func (p *stamperPutter) Put(ctx context.Context, mode storage.ModePut, chs ...sw
 		if err != nil {
 			return nil, err
 		}
+                if has {
+                        c, err := p.Storer.Get(ctx, storage.ModeGetSync, c.Address())
+                        if err != nil {
+                                p.logger.Debug("api: stamperPutter Put: Get", "chunk", c.Address().String(), "err", err)
+                        } else {
+                                id := c.Stamp().BatchID()
+                                if hex.EncodeToString(id) != p.batchID {
+                                //if hex.EncodeToString(id) !=  "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df" {
+                                        p.logger.Debug("api: stamperPutter Put: ", "chunk", c.Address().String(), "batch", id, "not", p.batchID)
+                                }
+                        }
+                }
 		if has || swarm.ContainsChunkWithAddress(chs[:i], c.Address()) {
 			exists[i] = true
 			continue

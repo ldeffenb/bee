@@ -39,7 +39,7 @@ var (
 	gcTargetRatio = 0.9
 	// gcBatchSize limits the number of chunks in a single
 	// transaction on garbage collection.
-	gcBatchSize uint64 = 10_000
+	gcBatchSize uint64 = 10_000	// Mine: 100_000
 
 	reserveEvictionBatch uint64 = 200
 )
@@ -50,6 +50,28 @@ var (
 // form retrieval and other indexes.
 func (db *DB) collectGarbageWorker() {
 	defer close(db.collectGarbageWorkerDone)
+
+	db.logger.Debug("GCSize:collectGarbageWorker: counting gcIndex")
+	startCount := time.Now()
+	c, err := db.gcIndex.Count()
+	if err != nil {
+		db.logger.Error(err,"GCSize:collectGarbageWorker:Count() failed")
+		c = 0
+	} else {
+		db.logger.Debug("GCSize:collectGarbageWorker:Count()", "count", c, "elapsed", time.Since(startCount))
+	}
+
+	// This code should only be used ONCE to reset the internal gcSize
+	if (true) {
+		batch := new(leveldb.Batch)
+		db.gcSize.PutInBatch(batch, uint64(c))
+       		err := db.shed.WriteBatch(batch)
+        	if err != nil {
+			db.logger.Error(err,"GCSize:collectGarbageWorker:WriteBatch failed")
+        	} else {
+			db.logger.Debug("GCSize:collectGarbageWorker:reset gcSize!", "count", c)
+		}
+	}
 
 	for {
 		select {
@@ -62,7 +84,11 @@ func (db *DB) collectGarbageWorker() {
 				db.logger.Error(err, "collect garbage failed")
 			}
 			// check if another gc run is needed
+			if collectedCount > 0 {
+				db.logger.Debug("pinTrace:collectGarbageWorker: gc'd", "chunks", collectedCount, "done", done)
+			}
 			if !done {
+				db.logger.Debug("pinTrace:collectGarbageTrigger!")
 				db.triggerGarbageCollection()
 			}
 
@@ -93,6 +119,9 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 	batch := new(leveldb.Batch)
 	target := db.gcTarget()
 
+	//target = 100_000
+	db.logger.Debug("GCSize:collectGarbage: using", "target", target, "batch", gcBatchSize)
+
 	// tell the localstore to start logging dirty addresses
 	db.lock.Lock(lockKeyGC)
 	db.gcRunning = true
@@ -109,7 +138,8 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 	if err != nil {
 		return 0, true, err
 	}
-	if gcSize == target {
+	db.logger.Debug("pinTrace:collectGarbage:top", "size", gcSize, "vs", target)
+	if gcSize <= target {
 		return 0, true, nil
 	}
 	db.metrics.GCSize.Set(float64(gcSize))
@@ -121,6 +151,7 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 
 	err = db.gcIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		if first {
+			db.logger.Debug("pinTrace:collectGarbage:1st", "chunk", swarm.NewAddress(item.Address).String(), "access", item.AccessTimestamp, "elapsed", time.Since(start))
 			totalTimeMetric(db.metrics.TotalTimeGCFirstItem, start)
 			first = false
 		}
@@ -156,9 +187,12 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 	var totalChunksEvicted uint64
 	locations := make([]sharky.Location, 0, len(candidates))
 
+	db.logger.Debug("pinTrace:collectGarbage:mid", "size", gcSize, "vs", target, "elapsed", time.Since(start))
+
 	// get rid of dirty entries
 	for _, item := range candidates {
 		if swarm.NewAddress(item.Address).MemberOf(db.dirtyAddresses) {
+			db.logger.Debug("pinTrace:collectGarbage: dirty", "chunk", swarm.NewAddress(item.Address).String(), "access", item.AccessTimestamp)
 			continue
 		}
 
@@ -185,10 +219,12 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 				}
 				continue
 			}
+			db.logger.Debug("pinTrace:collectGarbage: Not in retrievalDataIndex?", "chunk", swarm.NewAddress(item.Address).String())
 			return 0, false, err
 		}
 
 		db.metrics.GCStoreTimeStamps.Set(float64(storedItem.StoreTimestamp))
+		db.logger.Debug("pinTrace:collectGarbage: Deleting", "chunk", swarm.NewAddress(item.Address).String(), "access", storedItem.AccessTimestamp)
 		db.metrics.GCStoreAccessTimeStamps.Set(float64(item.AccessTimestamp))
 
 		// delete from retrieve, pull, gc
@@ -227,8 +263,24 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 		locations = append(locations, loc)
 	}
 
+	if false && done {
+		db.logger.Debug("GCSize:collectGarbage: counting gcIndex")
+	        startCount := time.Now()
+        	c, err := db.gcIndex.Count()
+        	if err != nil {
+                	db.logger.Error(err,"GCSize:collectGarbage:Count()2 failed")
+        	} else {
+                	db.logger.Debug("GCSize:collectGarbage:Count()2", "count", c, "elapsed", time.Since(startCount))
+                	if (uint64(c) != gcSize) {
+                        	db.logger.Debug("GCSize:collectGarbage: mismatch", "count", c, "gcSize", gcSize)
+                        	gcSize = uint64(c)
+                	}
+        	}
+	}
+
 	db.metrics.GCCommittedCounter.Add(float64(totalChunksEvicted))
 	db.gcSize.PutInBatch(batch, gcSize-totalChunksEvicted)
+	db.logger.Debug("GCSize:collectGarbage", "newSize", gcSize-totalChunksEvicted, "evicted", totalChunksEvicted)
 
 	err = db.shed.WriteBatch(batch)
 	if err != nil {
@@ -242,7 +294,7 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 			db.logger.Warning("failed releasing sharky location", "location", loc)
 		}
 	}
-
+	db.logger.Debug("pinTrace:collectGarbage:end", "evict", totalChunksEvicted, "size", gcSize-totalChunksEvicted, "vs", target, "done", done)
 	return totalChunksEvicted, done, nil
 }
 
@@ -282,6 +334,7 @@ func (db *DB) incGCSizeInBatch(batch *leveldb.Batch, change int64) (err error) {
 		// a conversion is needed with correct sign
 		c := uint64(-change)
 		if c > gcSize {
+			db.logger.Debug("GCSize:underflow", "gcSize", gcSize, "change", change)
 			// protect uint64 undeflow
 			return nil
 		}
@@ -289,6 +342,7 @@ func (db *DB) incGCSizeInBatch(batch *leveldb.Batch, change int64) (err error) {
 	}
 	db.gcSize.PutInBatch(batch, newSize)
 	db.metrics.GCSize.Set(float64(newSize))
+	db.logger.Debug("GCSize:incInBatch", "newSize", newSize, "change", change)
 
 	// trigger garbage collection if we reached the capacity
 	if newSize >= db.cacheCapacity {
@@ -319,6 +373,9 @@ func (db *DB) reserveEvictionWorker() {
 			evictedCount, done, err := db.evictReserve()
 			if err != nil {
 				db.logger.Error(err, "evict reserve failed")
+			}
+			if evictedCount > 0 {
+				db.logger.Debug("pinTrace:reserveEvictionWorker: Unreserved", "chunks", evictedCount)
 			}
 
 			if !done {
@@ -383,6 +440,9 @@ func (db *DB) evictReserve() (totalEvicted uint64, done bool, err error) {
 		e, err := db.unreserveBatch(batchID, radius)
 		if err != nil {
 			return true, err
+		}
+		if e > 0 {
+			db.logger.Debug("pinTrace:evictReserve: Unreserved", "chunks", e, "batch", swarm.NewAddress(batchID).String())
 		}
 		totalEvicted += e
 		if reserveSizeStart-totalEvicted <= target {

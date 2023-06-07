@@ -154,6 +154,7 @@ type Putter interface {
 
 type Getter interface {
 	Get(ctx context.Context, mode ModeGet, addr swarm.Address) (ch swarm.Chunk, err error)
+	PinCounter(addr swarm.Address) (count uint64, err error)
 }
 
 type Setter interface {

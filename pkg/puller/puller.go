@@ -278,7 +278,8 @@ func (p *Puller) syncPeerBin(ctx context.Context, peer *syncPeer, bin uint8, cur
 }
 
 func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uint8, cur uint64) {
-	loggerV2 := p.logger.V(2).Register()
+	//loggerV2 := p.logger.V(2).Register()
+	loggerV2 := p.logger
 
 	defer p.wg.Done()
 	defer p.metrics.HistWorkerDoneCounter.Inc()

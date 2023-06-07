@@ -145,7 +145,7 @@ func (s *Service) manage(warmupTime, wakeupInterval time.Duration, freshNode boo
 		s.lastRSize.Store(currentSize)
 
 		rate := s.syncer.SyncRate()
-		s.logger.Info("depthmonitor: state", "size", currentSize, "radius", radius, "sync_rate", fmt.Sprintf("%.2f ch/s", rate))
+		s.logger.Info("depthmonitor: state", "size", currentSize, "target size", targetSize, "radius", radius, "sync_rate", fmt.Sprintf("%.2f ch/s", rate))
 
 		if currentSize >= targetSize {
 			continue
@@ -168,6 +168,7 @@ func (s *Service) manage(warmupTime, wakeupInterval time.Duration, freshNode boo
 }
 
 func (s *Service) IsFullySynced() bool {
+	s.logger.Info("depthmonitor: IsFullySynced", "rate",  s.syncer.SyncRate(), "load", s.lastRSize.Load(), "ReserveCapacity*4/10", s.reserve.ReserveCapacity()*4/10)
 	return s.syncer.SyncRate() == 0 && s.lastRSize.Load() > s.reserve.ReserveCapacity()*4/10
 }
 

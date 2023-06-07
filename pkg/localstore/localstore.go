@@ -784,7 +784,7 @@ func (db *DB) DebugIndices() (indexInfo map[string]int, err error) {
 // stateStoreHasPins returns true if the state-store
 // contains any pins, otherwise false is returned.
 func (db *DB) stateStoreHasPins() (bool, error) {
-	pins, err := pinning.NewService(nil, db.stateStore, nil).Pins()
+	pins, err := pinning.NewService(nil, db.stateStore, nil, db.logger).Pins(0, 1)
 	if err != nil {
 		return false, err
 	}

@@ -55,14 +55,16 @@ const (
 const (
 	defaultBitSuffixLength             = 4 // the number of bits used to create pseudo addresses for balancing
 	defaultLowWaterMark                = 3 // the number of peers in consecutive deepest bins that constitute as nearest neighbours
-	defaultSaturationPeers             = 8
-	defaultOverSaturationPeers         = 20
+	defaultSaturationPeers             = 100 //8
+	defaultOverSaturationPeers         = 200 //20
 	defaultBootNodeOverSaturationPeers = 20
 	defaultShortRetry                  = 30 * time.Second
 	defaultTimeToRetry                 = 2 * defaultShortRetry
 	defaultBroadcastBinSize            = 4
 	defaultPeerPingPollTime            = 5 * time.Minute  // how often to ping a peer
 	defaultPingTimeout                 = 10 * time.Second // timeout for the ping response
+
+	quickSaturationPeers        = 4
 )
 
 var (
@@ -900,9 +902,11 @@ func (k *Kad) recalcDepth() {
 		depth                 uint8
 	)
 
+	k.logger.Debug("kademlia:recalcDepth: starting", "depth", k.depth)
 	// handle edge case separately
 	if peers.Length() <= k.opt.LowWaterMark {
 		k.depth = 0
+        	k.logger.Debug("kademlia:recalcDepth: LowWaterMark", "depth", k.depth, "peers", peers.Length(), "watermark", k.opt.LowWaterMark)
 		return
 	}
 
@@ -914,7 +918,7 @@ func (k *Kad) recalcDepth() {
 			binCount++
 			return false, false, nil
 		}
-		if bin > shallowestUnsaturated && binCount < k.opt.SaturationPeers {
+		if bin > shallowestUnsaturated && binCount < quickSaturationPeers {
 			// this means we have less than quickSaturationPeers in the previous bin
 			// therefore we can return assuming that bin is the unsaturated one.
 			return true, false, nil
@@ -925,6 +929,7 @@ func (k *Kad) recalcDepth() {
 		return false, false, nil
 	})
 	depth = shallowestUnsaturated
+	k.logger.Debug("kademlia:recalcDepth: unsaturated", "depth", depth)
 
 	shallowestEmpty, noEmptyBins := peers.ShallowestEmpty()
 	// if there are some empty bins and the shallowestEmpty is
@@ -932,6 +937,7 @@ func (k *Kad) recalcDepth() {
 	// unsaturated to the empty bin.
 	if !noEmptyBins && shallowestEmpty < depth {
 		depth = shallowestEmpty
+		k.logger.Debug("kademlia:recalcDepth: shallowestEmpty", "depth", k.depth)
 	}
 
 	var (
@@ -952,13 +958,16 @@ func (k *Kad) recalcDepth() {
 
 	if k.storageRadius < depth && !k.opt.IgnoreRadius {
 		depth = k.storageRadius
+		k.logger.Debug("kademlia:recalcDepth: storageRadius", "depth", k.depth)
 	}
 
 	if depth > candidate {
 		depth = candidate
+		k.logger.Debug("kademlia:recalcDepth: candidate", "depth", k.depth)
 	}
 
 	k.depth = depth
+	k.logger.Debug("kademlia:recalcDepth: final", "depth", k.depth)
 }
 
 // connect connects to a peer and gossips its address to our connected peers,

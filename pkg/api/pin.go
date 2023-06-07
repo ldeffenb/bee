@@ -7,7 +7,8 @@ package api
 import (
 	"errors"
 	"net/http"
-
+        "strconv"
+ 
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -122,7 +123,31 @@ func (s *Service) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
 func (s *Service) listPinnedRootHashes(w http.ResponseWriter, r *http.Request) {
 	logger := s.logger.WithName("get_pins").Build()
 
-	pinned, err := s.pinning.Pins()
+        var (
+                err           error
+                offset, limit = 0, 0 // default offset is 0, default limit unlimited (0) 
+        )
+
+        if v := r.URL.Query().Get("offset"); v != "" {
+                offset, err = strconv.Atoi(v)
+                if err != nil {
+                        logger.Debug("list pins: parse offset string failed", "string", v, "error", err)
+                        logger.Error(nil, "list pins: parse offset string failed")
+                        jsonhttp.BadRequest(w, "bad offset")
+			return
+                }
+        }
+        if v := r.URL.Query().Get("limit"); v != "" {
+                limit, err = strconv.Atoi(v)
+                if err != nil {
+                        logger.Debug("list pins: parse limit string failed", "string", v, "error", err)
+                        logger.Error(nil, "list pins: parse limit string failed")
+                        jsonhttp.BadRequest(w, "bad limit")
+			return
+                }
+        }
+
+	pinned, err := s.pinning.Pins(offset, limit)
 	if err != nil {
 		logger.Debug("list pinned root references: unable to list references", "error", err)
 		logger.Error(nil, "list pinned root references: unable to list references")

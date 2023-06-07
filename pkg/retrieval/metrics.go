@@ -20,6 +20,7 @@ type metrics struct {
 	RequestFailureCounter prometheus.Counter
 	RequestDurationTime   prometheus.Histogram
 	RequestAttempts       prometheus.Histogram
+	ConcurrentRequests    prometheus.Gauge
 	PeerRequestCounter    prometheus.Counter
 	TotalRetrieved        prometheus.Counter
 	InvalidChunkRetrieved prometheus.Counter
@@ -62,6 +63,12 @@ func newMetrics() metrics {
 			Name:      "request_attempts",
 			Help:      "Histogram for total retrieval attempts pre each request.",
 		}),
+                ConcurrentRequests: prometheus.NewGauge(prometheus.GaugeOpts{
+                        Namespace: m.Namespace,
+                        Subsystem: subsystem,
+                        Name:      "concurrent_count",
+                        Help:      "Number of concurrent requests.",
+                }),
 		PeerRequestCounter: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,

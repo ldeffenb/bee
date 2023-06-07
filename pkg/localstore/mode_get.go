@@ -29,6 +29,10 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+func (db *DB) PinCounter(addr swarm.Address) (uint64, error) {
+	return db.pinCounter(addr)
+}
+
 // Get returns a chunk from the database. If the chunk is
 // not found storage.ErrNotFound will be returned.
 // All required indexes will be updated required by the
@@ -62,17 +66,20 @@ func (db *DB) get(ctx context.Context, mode storage.ModeGet, addr swarm.Address)
 
 	out, err = db.retrievalDataIndex.Get(item)
 	if err != nil {
+		db.logger.Debug("localstore:get retrievalDataIndex failed", "chunk", addr, "err", err)
 		return out, err
 	}
 
 	l, err := sharky.LocationFromBinary(out.Location)
 	if err != nil {
+		db.logger.Debug("localstore:get sharky.LocationFromBinary failed", "chunk", addr, "err", err)
 		return out, err
 	}
 
 	out.Data = make([]byte, l.Length)
 	err = db.sharky.Read(ctx, l, out.Data)
 	if err != nil {
+		db.logger.Debug("localstore:get sharky.Read failed", "chunk", addr, "err", err)
 		return out, err
 	}
 
@@ -84,6 +91,7 @@ func (db *DB) get(ctx context.Context, mode storage.ModeGet, addr swarm.Address)
 	// no updates to indexes
 	case storage.ModeGetSync, storage.ModeGetLookup:
 	default:
+		db.logger.Debug("localstore:get invalid mode", "chunk", addr, "mode", mode)
 		return out, ErrInvalidMode
 	}
 	return out, nil

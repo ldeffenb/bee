@@ -66,6 +66,34 @@ func (db *DB) unreserveBatch(id []byte, radius uint8) (evicted uint64, err error
 			return 0, err
 		}
 	}
+//	var (
+//		gcSizeChange      int64 // number to add or subtract from gcSize and reserveSize
+//		reserveSizeChange uint64
+//	)
+//	unpin := func(item shed.Item) (stop bool, err error) {
+//		addr := swarm.NewAddress(item.Address)
+//		db.logger.Tracef("pinTrace:UnreserveBatch: Batch %s Radius %v Chunk %s unpinned", swarm.NewAddress(id).String(), radius, addr.String())
+//		c, err := db.setUnpin(batch, addr, 1)
+//		if err != nil {
+//			if !errors.Is(err, leveldb.ErrNotFound) {
+//				return false, fmt.Errorf("unpin: %w", err)
+//			} else {
+//				// this is possible when we are resyncing chain data after
+//				// a dirty shutdown
+//				db.logger.Tracef("unreserve set unpin chunk %s: %v", addr.String(), err)
+//			}
+//		} else {
+//			// we need to do this because a user might pin a chunk on top of
+//			// the reserve pinning. when we unpin due to an unreserve call, then
+//			// we should logically deduct the chunk anyway from the reserve size
+//			// otherwise the reserve size leaks, since c returned from setUnpin
+//			// will be zero.
+//			reserveSizeChange++
+//		}
+//
+//		gcSizeChange += c
+//		return false, nil
+//	}
 
 	// iterate over chunk in bins
 	for bin := uint8(0); bin < radius; bin++ {
@@ -114,7 +142,7 @@ func (db *DB) unpinBatchChunks(id []byte, bin uint8) (uint64, error) {
 	)
 	unpin := func(item shed.Item) (stop bool, err error) {
 		addr := swarm.NewAddress(item.Address)
-		c, err := db.setUnpin(batch, addr)
+		c, err := db.setUnpin(batch, addr, 1)
 		if err != nil {
 			if !errors.Is(err, leveldb.ErrNotFound) {
 				return false, fmt.Errorf("unpin: %w", err)
@@ -177,9 +205,10 @@ func withinRadius(db *DB, item shed.Item) bool {
 // starting at some proximity order with an generated address whose PO
 // is used as a starting prefix by the index.
 func (db *DB) ComputeReserveSize(startPO uint8) (uint64, error) {
-
+	loggerV1 := db.logger.V(1).Register()
 	var count uint64
 
+	start := time.Now()
 	err := db.pullIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		count++
 		return false, nil
@@ -196,6 +225,7 @@ func (db *DB) ComputeReserveSize(startPO uint8) (uint64, error) {
 		db.metrics.ReserveSize.Set(float64(count))
 	}
 
+	loggerV1.Debug("ComputeReserveSize executed", "po", startPO, "elapsed", time.Since(start), "count", count)
 	return count, err
 }
 

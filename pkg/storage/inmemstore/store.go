@@ -26,6 +26,11 @@ func New() *Store {
 	}
 }
 
+
+func (s *Store) PinCounter(addr swarm.Address) (uint64, error) {
+	return 0, nil
+}
+
 func (s *Store) Get(_ context.Context, _ storage.ModeGet, addr swarm.Address) (ch swarm.Chunk, err error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()

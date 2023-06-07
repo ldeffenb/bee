@@ -8,11 +8,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+//	"math"
+//	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethersphere/bee/pkg/log"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
+	"golang.org/x/sync/semaphore"
 	"resenje.org/singleflight"
 )
 
@@ -49,7 +53,10 @@ type Storer interface {
 type PullStorer struct {
 	storage.Storer
 	intervalsSF singleflight.Group
+	cursorsSF   singleflight.Group
+	sfCount	    atomic.Int64 
 	logger      log.Logger
+        cursorSem   *semaphore.Weighted
 	metrics     metrics
 }
 
@@ -57,6 +64,8 @@ type PullStorer struct {
 func New(storer storage.Storer, logger log.Logger) *PullStorer {
 	return &PullStorer{
 		Storer:  storer,
+                //cursorSem: semaphore.NewWeighted(int64(math.Max(1,float64(runtime.NumCPU()/2)))),
+		cursorSem: semaphore.NewWeighted(1),	// Extreme restrictions!
 		metrics: newMetrics(),
 		logger:  logger.WithName(loggerName).Register(),
 	}
@@ -73,7 +82,7 @@ func (s *PullStorer) IntervalChunks(ctx context.Context, bin uint8, from, to uin
 	s.metrics.TotalSubscribePullRequests.Inc()
 	defer s.metrics.TotalSubscribePullRequestsComplete.Inc()
 
-	v, _, err := s.intervalsSF.Do(ctx, fmt.Sprintf("%v-%v-%v-%v", bin, from, to, limit), func(ctx context.Context) (interface{}, error) {
+	v, shared, err := s.intervalsSF.Do(ctx, fmt.Sprintf("%v-%v-%v-%v", bin, from, to, limit), func(ctx context.Context) (interface{}, error) {
 		var (
 			chs     []swarm.Address
 			topmost uint64
@@ -150,21 +159,77 @@ func (s *PullStorer) IntervalChunks(ctx context.Context, bin uint8, from, to uin
 		s.metrics.SubscribePullsFailures.Inc()
 		return nil, 0, err
 	}
+	if shared {
+		s.logger.Debug("pullstorage:IntervalChunks:shared", "key", fmt.Sprintf("%v-%v-%v-%v", bin, from, to, limit))
+	}
 	r := v.(*result)
 	return r.chs, r.topmost, nil
 }
 
 // Cursors gets the last BinID for every bin in the local storage
-func (s *PullStorer) Cursors(ctx context.Context) (curs []uint64, err error) {
-	curs = make([]uint64, swarm.MaxBins)
-	for i := uint8(0); i < swarm.MaxBins; i++ {
-		binID, err := s.Storer.LastPullSubscriptionBinID(i)
-		if err != nil {
-			return nil, err
-		}
-		curs[i] = binID
-	}
-	return curs, nil
+func (s *PullStorer) Cursors(ctx context.Context) ([]uint64, error) {
+
+        type result struct {
+                curs     []uint64
+        }
+
+      s.metrics.TotalCursorsRequests.Inc()
+      defer s.metrics.TotalCursorsRequestsComplete.Inc()
+
+        v, shared, err := s.intervalsSF.Do(ctx, "CursorsKey", func(ctx context.Context) (interface{}, error) {
+      id := s.sfCount.Add(1)
+      s.logger.Debug("pullstorage:Cursors:starting singleflight", "id", id)
+      curs := make([]uint64, swarm.MaxBins)
+      for i := uint8(0); i < swarm.MaxBins; i++ {
+	      if ctx.Err() != nil {
+		s.logger.Debug("pullstorage:cursors:singleflight:ctx.Err", "id", id, "err", ctx.Err())
+		return nil, ctx.Err()
+	      }
+              if err := s.cursorSem.Acquire(ctx, 1); err != nil {
+                      s.metrics.PullCursorsFailures.Inc()
+			s.logger.Debug("pullstorage:cursors:singleflight:cursorSem.Acquire", "id", id, "err", err)
+                      return nil, err
+              }
+              start := time.Now()
+              s.metrics.PullCursorsStarted.Inc()
+              binID, err := s.Storer.LastPullSubscriptionBinID(i)
+              if err != nil {
+                      s.metrics.PullCursorsFailures.Inc()
+                      s.cursorSem.Release(1)
+			s.logger.Debug("pullstorage:cursors:singleflight:LastPull", "id", id, "err", err)
+                      return nil, err
+              }
+              curs[i] = binID
+              s.metrics.PullCursorsComplete.Inc()
+              s.cursorSem.Release(1)
+	      if time.Since(start) > time.Second {
+		s.logger.Debug("pullstorage:Cursors:bin complete", "id", id, "bin", i, "elapsed", time.Since(start), "last", binID)
+	      }
+      }
+      s.logger.Debug("pullstorage:Cursors:finish singleflight", "id", id)
+      //return curs, nil
+      return &result{curs: curs}, nil
+        })
+
+        if err != nil {
+s.logger.Debug("pullstorage:Cursors:err", "err", err, "shared", shared)
+                return nil, err
+        }
+        if shared {
+                s.logger.Debug("pullstorage:Cursors:shared!")
+        }
+        r := v.(*result)
+        return r.curs, nil
+
+//	curs = make([]uint64, swarm.MaxBins)
+//	for i := uint8(0); i < swarm.MaxBins; i++ {
+//		binID, err := s.Storer.LastPullSubscriptionBinID(i)
+//		if err != nil {
+//			return nil, err
+//		}
+//		curs[i] = binID
+//	}
+//	return curs, nil
 }
 
 // Get chunks.

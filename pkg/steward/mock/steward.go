@@ -7,6 +7,7 @@ package mock
 import (
 	"context"
 
+	"github.com/ethersphere/bee/pkg/steward"
 	"github.com/ethersphere/bee/pkg/swarm"
 )
 
@@ -26,6 +27,10 @@ func (s *Steward) Reupload(_ context.Context, addr swarm.Address) error {
 // The method always returns true.
 func (s *Steward) IsRetrievable(_ context.Context, addr swarm.Address) (bool, error) {
 	return addr.Equal(s.addr), nil
+}
+
+func (s *Steward) Track(_ context.Context, addr swarm.Address) (bool, []*steward.ChunkInfo, error) {
+	return addr.Equal(s.addr), nil, nil
 }
 
 // LastAddress returns the last address given to the Reupload method call.

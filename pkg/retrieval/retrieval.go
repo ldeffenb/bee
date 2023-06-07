@@ -41,6 +41,10 @@ const (
 	streamName      = "retrieval"
 )
 
+var (
+	errRateLimitExceeded = errors.New("rate limit exceeded")
+)
+
 var _ Interface = (*Service)(nil)
 
 type Interface interface {
@@ -381,6 +385,13 @@ func (s *Service) closestPeer(addr swarm.Address, skipPeers []swarm.Address, all
 func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
 	loggerV1 := s.logger.V(1).Register()
 
+	s.metrics.ConcurrentRequests.Inc()
+	defer s.metrics.ConcurrentRequests.Dec()
+//	if !s.limiter.Allow(p.Address.ByteString(), 1) {
+//		s.metrics.RateLimits.Inc()
+//		s.logger.Tracef("retrieval: peer %s rate limit exceeded", p.Address.String())
+//		return fmt.Errorf("peer %s: %w", p.Address.String(), errRateLimitExceeded)
+//	}
 	ctx, cancel := context.WithTimeout(ctx, retrieveChunkTimeout)
 	defer cancel()
 

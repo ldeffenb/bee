@@ -6,10 +6,12 @@ package postage
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
 	"github.com/ethersphere/bee/pkg/crypto"
+	"github.com/ethersphere/bee/pkg/log"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
 )
@@ -116,7 +118,7 @@ func toSignDigest(addr, batchId, index, timestamp []byte) ([]byte, error) {
 type ValidStampFn func(chunk swarm.Chunk, stampBytes []byte) (swarm.Chunk, error)
 
 // ValidStamp returns a stampvalidator function passed to protocols with chunk entrypoints.
-func ValidStamp(batchStore Storer) ValidStampFn {
+func ValidStamp(batchStore Storer, logger log.Logger) ValidStampFn {
 	return func(chunk swarm.Chunk, stampBytes []byte) (swarm.Chunk, error) {
 		stamp := new(Stamp)
 		err := stamp.UnmarshalBinary(stampBytes)
@@ -131,6 +133,8 @@ func ValidStamp(batchStore Storer) ValidStampFn {
 			return nil, err
 		}
 		if err = stamp.Valid(chunk.Address(), b.Owner, b.Depth, b.BucketDepth, b.Immutable); err != nil {
+			bucket, index := bytesToIndex(stamp.index)
+			logger.Debug("ValidStamp", "err", err, "chunk", chunk.Address(), "batch", hex.EncodeToString(stamp.BatchID()), "owner", hex.EncodeToString(b.Owner), "bucket", bucket, "index", index, "depth", b.Depth, "bucket", b.BucketDepth, "immutable", b.Immutable)
 			return nil, err
 		}
 		return chunk.WithStamp(stamp).WithBatch(b.StorageRadius, b.Depth, b.BucketDepth, b.Immutable), nil

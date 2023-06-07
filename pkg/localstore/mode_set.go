@@ -105,7 +105,8 @@ func (db *DB) set(ctx context.Context, mode storage.ModeSet, addrs ...swarm.Addr
 
 		for _, addr := range addrs {
 			item := addressToItem(addr)
-			c, err := db.setPin(batch, item)
+			db.logger.Debug("pinTrace:ModeSetPin: pinned", "chunk", swarm.NewAddress(item.Address).String())
+			c, err := db.setPin(batch, item, 10000)
 			if err != nil {
 				return err
 			}
@@ -116,7 +117,8 @@ func (db *DB) set(ctx context.Context, mode storage.ModeSet, addrs ...swarm.Addr
 		defer db.lock.Unlock(lockKeyGC)
 
 		for _, addr := range addrs {
-			c, err := db.setUnpin(batch, addr)
+			db.logger.Debug("pinTrace:ModeSetUnpin: unpinned", "chunk", addr.String())
+			c, err := db.setUnpin(batch, addr, 10000)
 			if err != nil {
 				return err
 			}
@@ -299,7 +301,7 @@ func (db *DB) setRemove(batch *leveldb.Batch, item shed.Item, check bool) (gcSiz
 // setPin increments pin counter for the chunk by updating
 // pin index and sets the chunk to be excluded from garbage collection.
 // Provided batch is updated.
-func (db *DB) setPin(batch *leveldb.Batch, item shed.Item) (gcSizeChange int64, err error) {
+func (db *DB) setPin(batch *leveldb.Batch, item shed.Item, pinIncrement uint64) (gcSizeChange int64, err error) {
 	// Get the existing pin counter of the chunk
 	i, err := db.pinIndex.Get(item)
 
@@ -317,18 +319,22 @@ func (db *DB) setPin(batch *leveldb.Batch, item shed.Item) (gcSizeChange int64, 
 			if !errors.Is(err, leveldb.ErrNotFound) {
 				return 0, err
 			}
+			//db.logger.Debug("pinTrace:setPin: not in retrievalAccessIndex?", "chunk", swarm.NewAddress(item.Address).String())
 			// not synced yet
 		} else {
 			item.AccessTimestamp = i.AccessTimestamp
 			i, err = db.retrievalDataIndex.Get(item)
 			if err != nil {
+				db.logger.Debug("pinTrace:setPin: not in retrievalDataIndex?", "chunk", swarm.NewAddress(item.Address).String())
 				return 0, fmt.Errorf("set pin: retrieval data: %w", err)
 			}
 			item.StoreTimestamp = i.StoreTimestamp
 			item.BinID = i.BinID
 
+			db.logger.Debug("pinTrace:setPin: pin removing from gc", "chunk", swarm.NewAddress(item.Address).String())
 			err = db.gcIndex.DeleteInBatch(batch, item)
 			if err != nil {
+				db.logger.Debug("pinTrace:setPin: not in gc", "chunk", swarm.NewAddress(item.Address).String(), "err", err)
 				return 0, err
 			}
 			gcSizeChange = -1
@@ -336,7 +342,8 @@ func (db *DB) setPin(batch *leveldb.Batch, item shed.Item) (gcSizeChange int64, 
 	}
 
 	// Otherwise increase the existing counter by 1
-	item.PinCounter++
+	item.PinCounter += pinIncrement
+	db.logger.Debug("pinTrace:setPin: pinned", "chunk", swarm.NewAddress(item.Address).String(), "delta", pinIncrement, "count", item.PinCounter)
 	err = db.pinIndex.PutInBatch(batch, item)
 	if err != nil {
 		return 0, err
@@ -346,7 +353,7 @@ func (db *DB) setPin(batch *leveldb.Batch, item shed.Item) (gcSizeChange int64, 
 
 // setUnpin decrements pin counter for the chunk by updating pin index.
 // Provided batch is updated.
-func (db *DB) setUnpin(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange int64, err error) {
+func (db *DB) setUnpin(batch *leveldb.Batch, addr swarm.Address, pinIncrement uint64) (gcSizeChange int64, err error) {
 	item := addressToItem(addr)
 
 	// Get the existing pin counter of the chunk
@@ -357,19 +364,22 @@ func (db *DB) setUnpin(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange i
 	item.PinCounter = i.PinCounter
 	// Decrement the pin counter or
 	// delete it from pin index if the pin counter has reached 0
-	if item.PinCounter > 1 {
-		item.PinCounter--
+	if item.PinCounter > pinIncrement {
+		item.PinCounter -= pinIncrement
+		db.logger.Debug("pinTrace:setUnpin: decrement", "chunk", swarm.NewAddress(item.Address).String(), "delta", pinIncrement, "count", item.PinCounter)
 		return 0, db.pinIndex.PutInBatch(batch, item)
 	}
 
 	// PinCounter == 0
 
+	db.logger.Debug("pinTrace:setUnpin: decrement - Deleted!", "chunk", swarm.NewAddress(item.Address).String(), "count", item.PinCounter, "delta", pinIncrement)
 	err = db.pinIndex.DeleteInBatch(batch, item)
 	if err != nil {
 		return 0, err
 	}
 	i, err = db.retrievalDataIndex.Get(item)
 	if err != nil {
+		db.logger.Debug("pinTrace:setUnpin: not in retrievalDataIndex", "chunk", swarm.NewAddress(item.Address).String(), "err", err)
 		return 0, fmt.Errorf("get retrieval data index: %w", err)
 	}
 	item.StoreTimestamp = i.StoreTimestamp
@@ -381,33 +391,53 @@ func (db *DB) setUnpin(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange i
 		// this is a bit odd, but we return a nil here, causing the pending batch to
 		// be written to leveldb, removing the item from the pin index, but not moving it to
 		// the gc index because it still exists in the push index.
+		db.logger.Debug("pinTrace:setUnpin: in pushIndex", "chunk", swarm.NewAddress(item.Address).String())
 		return 0, nil
 	case !errors.Is(err, leveldb.ErrNotFound):
 		// err is not leveldb.ErrNotFound
+		db.logger.Debug("pinTrace:setUnpin: pushIndex", "chunk", swarm.NewAddress(item.Address).String(), "err", err)
 		return 0, fmt.Errorf("get push index: %w", err)
 	}
 
 	i, err = db.retrievalAccessIndex.Get(item)
 	if err != nil {
 		if !errors.Is(err, leveldb.ErrNotFound) {
+			db.logger.Debug("pinTrace:setUnpin: retrievalAccessIndex.Get", "chunk", swarm.NewAddress(item.Address).String(), "err", err)
 			return 0, fmt.Errorf("get retrieval access index: %w", err)
 		}
 		item.AccessTimestamp = now()
 		err = db.retrievalAccessIndex.PutInBatch(batch, item)
 		if err != nil {
+			db.logger.Debug("pinTrace:setUnpin: retrievalAccessIndex.Put", "chunk", swarm.NewAddress(item.Address).String(), "err", err)
 			return 0, err
 		}
 	} else {
 		item.AccessTimestamp = i.AccessTimestamp
 	}
-	err = db.gcIndex.PutInBatch(batch, item)
-	if err != nil {
-		return 0, err
+
+	exists, err := db.gcIndex.Has(item)
+	if err != nil && !errors.Is(err, leveldb.ErrNotFound) {
+		db.logger.Error(err, "pinTrace:setUnpin: gcIndex err",
+							"chunk", swarm.NewAddress(item.Address).String(),
+							"access", item.AccessTimestamp)
+	} else if exists {
+		db.logger.Debug("pinTrace:setUnpin: already in gcIndex",
+							"chunk", swarm.NewAddress(item.Address).String(),
+                                                        "access", item.AccessTimestamp)
+	} else {
+		db.logger.Debug("pinTrace:setUnpin: unpinned and added to gcIndex",
+				"chunk", swarm.NewAddress(item.Address).String(),
+                               	"access", item.AccessTimestamp)
+		err = db.gcIndex.PutInBatch(batch, item)
+		if err != nil {
+			return 0, err
+		}
+		gcSizeChange++
 	}
 	err = db.pullIndex.DeleteInBatch(batch, item)
 	if err != nil {
 		return 0, err
 	}
 
-	return 1, nil
+	return gcSizeChange, nil
 }

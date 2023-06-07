@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/pkg/steward"
 
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/gorilla/mux"
@@ -62,3 +63,35 @@ func (s *Service) stewardshipGetHandler(w http.ResponseWriter, r *http.Request) 
 		IsRetrievable: res,
 	})
 }
+
+type trackResponse struct {
+	IsRetrievable bool `json:"isRetrievable"`
+	Chunks []*steward.ChunkInfo `json:"chunks"`
+}
+
+//  stewardshipTrackHandler gets detailed information about the reference and all
+// associated chunks to the network.
+func (s *Service) stewardshipTrackHandler(w http.ResponseWriter, r *http.Request) {
+        logger := s.logger.WithName("get_stewardship").Build()
+
+        paths := struct {
+                Address swarm.Address `map:"address,resolve" validate:"required"`
+        }{}
+        if response := s.mapStructure(mux.Vars(r), &paths); response != nil {
+                response("invalid path params", logger, w)
+                return
+        }
+
+	res, chunks, err := s.steward.Track(r.Context(), paths.Address)
+	if err != nil {
+		s.logger.Debug("stewardship track: failed", "chunk_address", paths.Address, "error", err)
+		s.logger.Error(nil, "stewardship track: failed")
+		jsonhttp.InternalServerError(w, "stewardship track: failed")
+		return
+	}
+	jsonhttp.OK(w, trackResponse{
+		IsRetrievable: res,
+		Chunks: chunks,
+	})
+}
+

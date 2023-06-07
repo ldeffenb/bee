@@ -76,15 +76,23 @@ func (s *store) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Addres
 		if !cac.Valid(ch) && !soc.Valid(ch) {
 			err = errInvalidLocalChunk
 			ch = nil
-			s.logger.Warning("netstore: got invalid chunk from localstore, falling back to retrieval")
+			s.logger.Warning("netstore: got invalid chunk from localstore, falling back to retrieval", "chunk", addr)
 			s.metrics.InvalidLocalChunksCounter.Inc()
 		}
 	}
 	if err != nil {
+		s.logger.Debug("netstore:Get Storer.Get failed", "chunk", addr, "err", err)
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, errInvalidLocalChunk) {
+
+			c, _ := s.Storer.PinCounter(addr)
+			if c > 0 {
+				s.logger.Debug("pinTrace:retrieval:", "chunk", addr, "pinCounter", c)
+			}
+
 			// request from network
 			ch, err = s.retrieval.RetrieveChunk(ctx, addr, swarm.ZeroAddress)
 			if err != nil {
+				s.logger.Debug("netstore:Get RetrieveChunk failed", "chunk", addr, "err", err)
 				return nil, err
 			}
 			s.wg.Add(1)
@@ -102,6 +110,7 @@ func (s *store) put(ch swarm.Chunk, mode storage.ModeGet) {
 	go func() {
 		defer s.wg.Done()
 
+		s.logger.Debug("netstore:put putting", "chunk", ch.Address())
 		select {
 		case <-s.sCtx.Done():
 			s.logger.Debug("netstore: stopping netstore")
@@ -129,11 +138,14 @@ func (s *store) put(ch swarm.Chunk, mode storage.ModeGet) {
 			// we force it into the cache.
 			putMode = storage.ModePutRequestCache
 			cch = ch
+			s.logger.Debug("netstore:put: invalid stamp, caching", "chunk", ch.Address())
 		}
 
 		_, err = s.Storer.Put(s.sCtx, putMode, cch)
 		if err != nil {
 			s.logger.Error(err, "failed to put chunk", "chunk_address", cch.Address())
+		} else {
+			s.logger.Debug("netstore:put success", "chunk", cch.Address())
 		}
 	}()
 }

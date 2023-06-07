@@ -622,7 +622,7 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 		path = filepath.Join(o.DataDir, "localstore")
 	}
 
-	validStamp := postage.ValidStamp(batchStore)
+	validStamp := postage.ValidStamp(batchStore,logger)
 
 	lo := &localstore.Options{
 		Capacity:               o.CacheCapacity,
@@ -907,7 +907,7 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 
 	traversalService := traversal.New(ns)
 
-	pinningService := pinning.NewService(storer, stateStore, traversalService)
+	pinningService := pinning.NewService(storer, stateStore, traversalService, logger)
 
 	pushSyncProtocol := pushsync.New(swarmAddress, nonce, p2ps, storer, kad, batchStore, tagService, o.FullNodeMode, pssService.TryUnwrap, validStamp, logger, acc, pricer, signer, tracer, warmupTime)
 	b.pushSyncCloser = pushSyncProtocol
@@ -1036,7 +1036,7 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 	}
 
 	feedFactory := factory.New(ns)
-	steward := steward.New(storer, traversalService, retrieve, pushSyncProtocol)
+	steward := steward.New(storer, logger, traversalService, retrieve, pushSyncProtocol)
 
 	extraOpts := api.ExtraOptions{
 		Pingpong:         pingPong,

@@ -14,6 +14,7 @@ import (
 	"math"
 	"sync"
 	"time"
+        "golang.org/x/sync/semaphore"
 
 	"github.com/ethersphere/bee/pkg/bitvector"
 	"github.com/ethersphere/bee/pkg/cac"
@@ -81,6 +82,8 @@ type Syncer struct {
 	radius         postage.Radius
 	overlayAddress swarm.Address
 
+	cursorSem   *semaphore.Weighted
+
 	rate *rate.Rate
 
 	Interface
@@ -100,6 +103,7 @@ func New(streamer p2p.Streamer, storage pullstorage.Storer, unwrap func(swarm.Ch
 		quit:           make(chan struct{}),
 		radius:         radius,
 		overlayAddress: overlayAddress,
+		cursorSem: semaphore.NewWeighted(1024),    // 16 at a time due to singleflight in Cursors() // 1=Extreme restrictions!
 		rate:           rate.New(DefaultRateDuration),
 	}
 }
@@ -422,15 +426,16 @@ func (s *Syncer) GetCursors(ctx context.Context, peer swarm.Address) (retr []uin
 }
 
 func (s *Syncer) cursorHandler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
-	loggerV2 := s.logger.V(2).Register()
+	//loggerV2 := s.logger.V(2).Register()
 
 	w, r := protobuf.NewWriterAndReader(stream)
-	loggerV2.Debug("peer wants cursors", "peer_address", p.Address)
+	s.logger.Debug("pullsync:cursorHandler:peer wants cursors", "peer_address", p.Address)
 	defer func() {
 		if err != nil {
 			_ = stream.Reset()
-			loggerV2.Debug("error getting cursors for peer", "peer_address", p.Address, "error", err)
+			s.logger.Debug("pullsync:cursorHandler:error getting cursors for peer", "peer_address", p.Address, "error", err)
 		} else {
+			s.logger.Debug("pullsync:cursorHandler:got cursors for peer", "peer_address", p.Address)
 			_ = stream.FullClose()
 		}
 	}()
@@ -440,12 +445,31 @@ func (s *Syncer) cursorHandler(ctx context.Context, p p2p.Peer, stream p2p.Strea
 		return fmt.Errorf("read syn: %w", err)
 	}
 
+      s.metrics.TotalCursorsRequests.Inc()
+      defer s.metrics.TotalCursorsRequestsComplete.Inc()
+
+	totalStart := time.Now()
+	if err := s.cursorSem.Acquire(ctx, 1); err != nil {
+		s.logger.Debug("pullsync:cursorHandler:Cursors():cursorSem.Acquire", "err", err)
+		return fmt.Errorf("cursorSem.Acquire: %w", err)
+	}
+	if ctx.Err() != nil {
+		s.cursorSem.Release(1)
+		s.logger.Debug("pullsync:cursorHandler:Cursors():ctx.Err", "err", ctx.Err())
+		return fmt.Errorf("cursorSem.Acquired:cxt %w", ctx.Err())
+	}
+	
+	start := time.Now()
 	var ack pb.Ack
 	s.metrics.DbOps.Inc()
 	ints, err := s.storage.Cursors(ctx)
 	if err != nil {
+		s.cursorSem.Release(1)
+		s.logger.Debug("pullsync:cursorHandler:Cursors()", "err", err)
 		return err
 	}
+	s.cursorSem.Release(1)
+	s.logger.Debug("pullsync:cursorHandler:Cursors()", "elapsed", time.Since(start), "wait", (time.Since(totalStart)-time.Since(start)), "peer", p.Address.String())
 	ack.Cursors = ints
 	if err = w.WriteMsgWithContext(ctx, &ack); err != nil {
 		return fmt.Errorf("write ack: %w", err)

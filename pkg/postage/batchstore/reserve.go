@@ -171,6 +171,10 @@ func (s *store) Unreserve(cb postage.UnreserveIteratorFn) error {
 		}
 
 		s.logger.Debug("unreserve callback", "batch_id", hex.EncodeToString(id), "storage_radius", s.rs.StorageRadius, "batch_storage_radius", b.StorageRadius)
+                if hex.EncodeToString(id) ==  "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df" {
+                        s.logger.Debug("batchstore: Unreserve callback - SKIPPED!", "batch", hex.EncodeToString(id), "radius", b.StorageRadius)
+                        return false, nil
+                }
 
 		stopped, err = cb(id, s.rs.StorageRadius)
 		if err != nil {
