@@ -168,6 +168,7 @@ func (s *Service) manage(warmupTime, wakeupInterval time.Duration, freshNode boo
 }
 
 func (s *Service) IsFullySynced() bool {
+	s.logger.Info("depthmonitor: IsFullySynced", "rate", s.syncer.SyncRate(), "load", s.lastRSize.Load(), "ReserveCapacity/*4/10", s.reserve.ReserveCapacity()*4/10)
 	return s.syncer.SyncRate() == 0 && s.lastRSize.Load() > s.reserve.ReserveCapacity()*4/10
 }
 

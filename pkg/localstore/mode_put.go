@@ -68,14 +68,24 @@ func (r *releaseLocations) add(loc sharky.Location) {
 // in multiple put method calls.
 func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, retErr error) {
 	// protect parallel updates
+	startWait := time.Now()
 	db.lock.Lock(lockKeyGC)
+	elapsedWait := time.Since(startWait)
+	if elapsedWait > time.Second {
+		db.logger.Debug("db.put lock 1", "wait", elapsedWait, "mode", mode, "count", len(chs))
+	}
+	durationWait := time.Now()
 	if db.gcRunning {
 		for _, ch := range chs {
 			db.dirtyAddresses = append(db.dirtyAddresses, ch.Address())
 		}
 	}
 	db.lock.Unlock(lockKeyGC)
-
+	durationHeld := time.Since(durationWait)
+	if durationHeld > time.Second {
+		db.logger.Debug("db.put held 1", "wait", durationHeld)
+	}
+	
 	batch := new(leveldb.Batch)
 
 	// variables that provide information for operations
@@ -208,8 +218,15 @@ func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 		}
 
 	case storage.ModePutSync:
+
+		startWait := time.Now()
 		db.lock.Lock(lockKeyGC)
 		defer db.lock.Unlock(lockKeyGC)
+		elapsedWait := time.Since(startWait)
+		if elapsedWait > time.Second {
+			db.logger.Debug("db.put ModePutSync lock", "wait", elapsedWait, "count", len(chs))
+		}
+		durationWait := time.Now()
 
 		for i, ch := range chs {
 			exists, c, err := putChunk(ch, i, func(item shed.Item, exists bool) (int64, error) {
@@ -225,6 +242,10 @@ func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 				triggerPullFeed[db.po(ch.Address())] = struct{}{}
 			}
 			gcSizeChange += c
+		}
+		durationHeld := time.Since(durationWait)
+		if durationHeld > time.Second {
+			db.logger.Debug("db.put ModePutSync lock", "held", durationHeld, "count", len(chs))
 		}
 
 	default:
@@ -381,7 +402,7 @@ func (db *DB) putRequest(
 		}
 	}
 
-	return db.setPin(batch, item)
+	return db.setPin(batch, item, 1)
 }
 
 // putUpload adds an Item to the batch by updating required indexes:
@@ -424,7 +445,8 @@ func (db *DB) putUpload(
 	}
 
 	if pin {
-		return db.setPin(batch, item)
+		db.logger.Debug("pinTrace:ModePutUploadPin: pinned", "chunk", swarm.NewAddress(item.Address).String())
+		return db.setPin(batch, item, 10000)
 	}
 	return 0, nil
 }
@@ -488,7 +510,7 @@ func (db *DB) putSync(
 		return 0, err
 	}
 
-	return db.setPin(batch, item)
+	return db.setPin(batch, item, 1)
 }
 
 func (db *DB) addToCache(
@@ -498,27 +520,66 @@ func (db *DB) addToCache(
 	// add new entry to gc index ONLY if it is not present in pinIndex
 	ok, err := db.pinIndex.Has(item)
 	if err != nil {
+		db.logger.Debug("pinTrace:addToCache: pinIndex err",
+							"chunk", swarm.NewAddress(item.Address).String(),
+							"po", db.po(swarm.NewAddress(item.Address)),
+							"radius", item.Radius,
+							"batch", swarm.NewAddress(item.BatchID).String(),
+							"err", err)
 		return 0, fmt.Errorf("failed checking pinIndex: %w", err)
 	}
 	if ok {
 		// if the chunk is pinned we dont add it to cache
+		db.logger.Debug("pinTrace:addToCache: ALREADY pinned",
+							"chunk", swarm.NewAddress(item.Address).String(),
+							"po", db.po(swarm.NewAddress(item.Address)),
+							"radius", item.Radius,
+							"batch", swarm.NewAddress(item.BatchID).String())
 		return 0, nil
 	}
 	exists, err := db.gcIndex.Has(item)
 	if err != nil && !errors.Is(err, leveldb.ErrNotFound) {
+		db.logger.Debug("pinTrace:addToCache: gcIndex err",
+							"chunk", swarm.NewAddress(item.Address).String(),
+							"po", db.po(swarm.NewAddress(item.Address)),
+							"radius", item.Radius,
+							"batch", swarm.NewAddress(item.BatchID).String(),
+							"err", err)
 		return 0, err
 	}
 	if exists {
+		db.logger.Debug("pinTrace:addToCache: already in gc",
+							"chunk", swarm.NewAddress(item.Address).String(),
+							"po", db.po(swarm.NewAddress(item.Address)),
+							"radius", item.Radius,
+							"batch", swarm.NewAddress(item.BatchID).String())
 		return 0, nil
 	}
 	err = db.gcIndex.PutInBatch(batch, item)
 	if err != nil {
+		db.logger.Debug("pinTrace:addToCache: gc`Index err",
+							"chunk", swarm.NewAddress(item.Address).String(),
+							"po", db.po(swarm.NewAddress(item.Address)),
+							"radius", item.Radius,
+							"batch", swarm.NewAddress(item.BatchID).String(),
+							"err", err)
 		return 0, err
 	}
 	err = db.pullIndex.DeleteInBatch(batch, item)
 	if err != nil {
+		db.logger.Debug("pinTrace:addToCache: pullIndex err",
+							"chunk", swarm.NewAddress(item.Address).String(),
+							"po", db.po(swarm.NewAddress(item.Address)),
+							"radius", item.Radius,
+							"batch", swarm.NewAddress(item.BatchID).String(),
+							"err", err)
 		return 0, err
 	}
+	db.logger.Debug("pinTrace:addToCache: cached",
+						"chunk", swarm.NewAddress(item.Address).String(),
+						"po", db.po(swarm.NewAddress(item.Address)),
+						"radius", item.Radius,
+						"batch", swarm.NewAddress(item.BatchID).String())
 
 	return 1, nil
 }

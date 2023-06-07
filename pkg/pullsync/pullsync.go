@@ -64,7 +64,7 @@ type Interface interface {
 	// interval. If the requested interval is too large, the downstream peer
 	// has the liberty to provide less chunks than requested.
 	// A zero topmost is returned if a catastrophic error was encountered and the same interval should be tried again.
-	SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64) (topmost uint64, err error)
+	SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64) (topmost uint64, gotCount int, err error)
 	// GetCursors retrieves all cursors from a downstream peer.
 	GetCursors(ctx context.Context, peer swarm.Address) ([]uint64, error)
 }
@@ -125,12 +125,12 @@ func (s *Syncer) Protocol() p2p.ProtocolSpec {
 // It returns the BinID of the highest chunk that was synced from the given interval.
 // If the requested interval is too large, the downstream peer has the liberty to
 // provide fewer chunks than requested.
-func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64) (uint64, error) {
+func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8, from, to uint64) (uint64, int, error) {
 	loggerV2 := s.logger.V(2).Register()
 
 	stream, err := s.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
 	if err != nil {
-		return 0, fmt.Errorf("new stream: %w", err)
+		return 0, 0, fmt.Errorf("new stream: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -145,22 +145,22 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 
 	rangeMsg := &pb.GetRange{Bin: int32(bin), From: from, To: to}
 	if err = w.WriteMsgWithContext(ctx, rangeMsg); err != nil {
-		return 0, fmt.Errorf("write get range: %w", err)
+		return 0, 0, fmt.Errorf("write get range: %w", err)
 	}
 
 	var offer pb.Offer
 	if err = r.ReadMsgWithContext(ctx, &offer); err != nil {
-		return 0, fmt.Errorf("read offer: %w", err)
+		return 0, 0, fmt.Errorf("read offer: %w", err)
 	}
 
 	if len(offer.Hashes)%swarm.HashSize != 0 {
-		return 0, fmt.Errorf("inconsistent hash length")
+		return 0, 0, fmt.Errorf("inconsistent hash length")
 	}
 
 	// empty interval (no chunks present in interval).
 	// return the end of the requested range as topmost.
 	if len(offer.Hashes) == 0 {
-		return offer.Topmost, nil
+		return offer.Topmost, 0, nil
 	}
 
 	topmost := offer.Topmost
@@ -174,7 +174,7 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 
 	bv, err := bitvector.New(bvLen)
 	if err != nil {
-		return 0, fmt.Errorf("new bitvector: %w", err)
+		return topmost, 0, fmt.Errorf("new bitvector: %w", err)
 	}
 
 	for i := 0; i < len(offer.Hashes); i += swarm.HashSize {
@@ -205,7 +205,7 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 
 	wantMsg := &pb.Want{BitVector: bv.Bytes()}
 	if err = w.WriteMsgWithContext(ctx, wantMsg); err != nil {
-		return 0, fmt.Errorf("write want: %w", err)
+		return topmost, 0, fmt.Errorf("write want: %w", err)
 	}
 
 	var chunksToPut []swarm.Chunk
@@ -214,7 +214,7 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 	for ; ctr > 0; ctr-- {
 		var delivery pb.Delivery
 		if err = r.ReadMsgWithContext(ctx, &delivery); err != nil {
-			return 0, fmt.Errorf("read delivery: %w", err)
+			return topmost, 0, fmt.Errorf("read delivery: %w", err)
 		}
 
 		addr := swarm.NewAddress(delivery.Address)
@@ -253,13 +253,16 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 
 		s.metrics.DbOps.Inc()
 
+		putStart := time.Now()
 		if err := s.storage.Put(ctx, storage.ModePutSync, chunksToPut...); err != nil {
-			return 0, errors.Join(chunkErr, fmt.Errorf("delivery put: %w", err))
+			s.logger.Debug("SyncInterval: Put", "chunks", len(chunksToPut), "elapsed", time.Since(putStart), "err", err)
+			return topmost, len(chunksToPut), errors.Join(chunkErr, fmt.Errorf("delivery put: %w", err))
 		}
+		s.logger.Debug("SyncInterval: Put", "chunks", len(chunksToPut), "elapsed", time.Since(putStart))
 		s.metrics.LastReceived.WithLabelValues(fmt.Sprintf("%d", bin)).Set(float64(time.Now().Unix()))
 	}
 
-	return topmost, chunkErr
+	return topmost, len(chunksToPut), chunkErr
 }
 
 // SyncRate returns chunks per second synced.
@@ -303,6 +306,29 @@ func (s *Syncer) handler(streamCtx context.Context, p p2p.Peer, stream p2p.Strea
 	if err := r.ReadMsgWithContext(ctx, &rn); err != nil {
 		return fmt.Errorf("read get range: %w", err)
 	}
+	
+//	if rn.To != MaxCursor {	// Only hang historical syncs
+//		overlay := p.Address.String()
+//		if overlay != "47d48ff50fcfe118ecadb97d6cefe17397a0eeb554e4112b7a24d14ded8451bc" &&
+//			overlay != "6fd0d067701378099de5da82255641692d02392dbdc8ab84ea763f8d4515d037" &&
+//			overlay != "7cd1aa0441c0624b9e7d10c0c06c6de184c1bbe69c8c6c151bede80c4ecea8b2" &&
+//			overlay != "86d7a00d43cbb9810b85031cb655ce073ab99acf78956520e0b287c847424249" &&
+//			overlay != "df6c1b18cc21d07e0b89b05d16153002037f76982709ff879f2e6d60de7d2127" &&
+//			overlay != "e1dc994c4a8ba82c183cd9b773210d7c88061c507fb9a9dfcbccea04b8380134" {
+//			s.logger.Debug("pullsync.handler foreign hold", "bin", rn.Bin, "from", rn.From, "to", rn.To, "peer", overlay)
+//			select {
+//			case <-ctx.Done():
+//				s.logger.Debug("pullsync.handler foreign unhold", "bin", rn.Bin, "from", rn.From, "to", rn.To, "peer", overlay)
+//				return nil
+//			}
+//			s.logger.Debug("pullsync.handler foreign huh?", "bin", rn.Bin, "from", rn.From, "to", rn.To, "peer", overlay)
+//			return nil
+//		} else {
+//			s.logger.Debug("pullsync.handler local overlay", "bin", rn.Bin, "from", rn.From, "to", rn.To, "peer", p.Address.String())
+//		}
+////	} else {
+////		s.logger.Debug("pullsync.handler live sync", "bin", rn.Bin, "from", rn.From, "peer", p.Address.String())
+//	}
 
 	// make an offer to the upstream peer in return for the requested range
 	offer, _, err := s.makeOffer(ctx, rn)

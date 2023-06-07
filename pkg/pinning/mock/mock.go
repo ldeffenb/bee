@@ -53,6 +53,6 @@ func (sm *ServiceMock) HasPin(ref swarm.Address) (bool, error) {
 }
 
 // Pins implements pinning.Interface Pins method.
-func (sm *ServiceMock) Pins() ([]swarm.Address, error) {
+func (sm *ServiceMock) Pins(int, int) ([]swarm.Address, error) {
 	return append([]swarm.Address(nil), sm.references...), nil
 }

@@ -249,6 +249,15 @@ func (s *Service) pushChunk(ctx context.Context, ch swarm.Chunk, logger log.Logg
 	// for now ignoring the receipt and checking only for error
 	receipt, err := s.pushSyncer.PushChunkToClosest(ctx, ch)
 	if err != nil {
+	
+		// Ignore "storing outside of the neighborhood", treat it as ErrWantSelf
+		//wasOutOfDepth := false
+		if errors.Is(err, pushsync.ErrOutOfDepthStoring) {
+			logger.Debug("pusher: outside of neighborhood, keeping here", "chunk", ch.Address().String())
+			err = topology.ErrWantSelf
+			//wasOutOfDepth = true	// Suppress redundant logging
+		}
+	
 		// when doing a direct upload from a light node this will never happen because the light node
 		// never includes self in kademlia iterator. This is only hit when doing a direct upload from a full node
 		if directUpload && errors.Is(err, topology.ErrWantSelf) {

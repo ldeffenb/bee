@@ -29,6 +29,10 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+func (db *DB) PinCounter(addr swarm.Address) (uint64, error) {
+	return db.pinCounter(addr)
+}
+
 // Get returns a chunk from the database. If the chunk is
 // not found storage.ErrNotFound will be returned.
 // All required indexes will be updated required by the

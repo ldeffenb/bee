@@ -177,7 +177,7 @@ func (t *transactionService) Send(ctx context.Context, request *TxRequest, boost
 		return common.Hash{}, err
 	}
 
-	loggerV1.Debug("sending transaction", "tx", signedTx.Hash(), "nonce", nonce)
+	loggerV1.Debug("sending transaction", "tx", signedTx.Hash(), "nonce", nonce, "FeeCap", signedTx.GasFeeCap(), "TipCap", signedTx.GasTipCap(), "limit", signedTx.Gas())
 
 	err = t.backend.SendTransaction(ctx, signedTx)
 	if err != nil {
@@ -291,6 +291,17 @@ func (t *transactionService) prepareTransaction(ctx context.Context, request *Tx
 		}
 	} else {
 		gasLimit = request.GasLimit
+		estimatedLimit, err := t.backend.EstimateGas(ctx, ethereum.CallMsg{
+			From: t.sender,
+			To:   request.To,
+			Data: request.Data,
+		})
+		if err != nil {
+			t.logger.Error(err, "Error estimating gas limit", "desc", request.Description)
+			err = nil;
+		} else {
+			t.logger.Debug("gas limit check", "desc", request.Description, "specified", request.GasLimit, "estimated", estimatedLimit)
+		}
 	}
 
 	/*
@@ -331,6 +342,11 @@ func (t *transactionService) suggestedFeeAndTip(ctx context.Context, gasPrice *b
 			return nil, nil, err
 		}
 		gasPrice = new(big.Int).Div(new(big.Int).Mul(big.NewInt(int64(boostPercent)+100), gasPrice), big.NewInt(100))
+	} else {
+		gasPriceSuggested, err := t.backend.SuggestGasPrice(ctx)
+		if err == nil {
+			t.logger.Debug("gas price check", "specified", gasPrice, "suggested", gasPriceSuggested)
+		}
 	}
 
 	gasTipCap, err := t.backend.SuggestGasTipCap(ctx)

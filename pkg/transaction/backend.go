@@ -41,22 +41,22 @@ type Backend interface {
 // is true if the current wall clock is after the block time of last block
 // with the given maxDelay as the maximum duration we can be behind the block
 // time.
-func IsSynced(ctx context.Context, backend Backend, maxDelay time.Duration) (bool, time.Time, error) {
+func IsSynced(ctx context.Context, backend Backend, maxDelay time.Duration) (bool, time.Time, int64, error) {
 	number, err := backend.BlockNumber(ctx)
 	if err != nil {
-		return false, time.Time{}, err
+		return false, time.Time{}, int64(number), err
 	}
 	header, err := backend.HeaderByNumber(ctx, big.NewInt(int64(number)))
 	if errors.Is(err, ethereum.NotFound) {
-		return false, time.Time{}, nil
+		return false, time.Time{}, int64(number), nil
 	}
 	if err != nil {
-		return false, time.Time{}, err
+		return false, time.Time{}, int64(number), err
 	}
 
 	blockTime := time.Unix(int64(header.Time), 0)
 
-	return blockTime.After(time.Now().UTC().Add(-maxDelay)), blockTime, nil
+	return blockTime.After(time.Now().UTC().Add(-maxDelay)), blockTime, int64(number), nil
 }
 
 // WaitSynced will wait until we are synced with the given blockchain backend,
@@ -66,12 +66,13 @@ func WaitSynced(ctx context.Context, logger log.Logger, backend Backend, maxDela
 	logger = logger.WithName(loggerName).Register()
 
 	for {
-		synced, blockTime, err := IsSynced(ctx, backend, maxDelay)
+		synced, blockTime, blockNumber, err := IsSynced(ctx, backend, maxDelay)
 		if err != nil {
 			return err
 		}
 
 		if synced {
+			logger.Info("Ethereum is synced.", "block", blockNumber, "time", blockTime)
 			return nil
 		}
 

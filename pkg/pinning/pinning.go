@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/ethersphere/bee/pkg/encryption"
+	"github.com/ethersphere/bee/pkg/log"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/traversal"
@@ -34,7 +35,7 @@ type Interface interface {
 	// HasPin returns true if the given reference has root pin.
 	HasPin(swarm.Address) (bool, error)
 	// Pins return all pinned references.
-	Pins() ([]swarm.Address, error)
+	Pins(int, int) ([]swarm.Address, error)
 }
 
 const storePrefix = "root-pin"
@@ -48,11 +49,13 @@ func NewService(
 	pinStorage storage.Storer,
 	rhStorage storage.StateStorer,
 	traverser traversal.Traverser,
+	logger log.Logger,
 ) *Service {
 	return &Service{
 		pinStorage: pinStorage,
 		rhStorage:  rhStorage,
 		traverser:  traverser,
+		logger:		logger,
 	}
 }
 
@@ -61,12 +64,14 @@ type Service struct {
 	pinStorage storage.Storer
 	rhStorage  storage.StateStorer
 	traverser  traversal.Traverser
+	logger 	   log.Logger
 }
 
 // CreatePin implements Interface.CreatePin method.
 func (s *Service) CreatePin(ctx context.Context, ref swarm.Address, traverse bool) error {
 	// iterFn is a pinning iterator function over the leaves of the root.
 	iterFn := func(leaf swarm.Address) error {
+		s.logger.Debug("pinTrace:CreatePin: pinned", "reference", ref.String(), "chunk", leaf.String())
 		switch err := s.pinStorage.Set(ctx, storage.ModeSetPin, leaf); {
 		case errors.Is(err, storage.ErrNotFound):
 			ch, err := s.pinStorage.Get(ctx, storage.ModeGetRequestPin, leaf)
@@ -84,11 +89,12 @@ func (s *Service) CreatePin(ctx context.Context, ref swarm.Address, traverse boo
 	}
 
 	if traverse {
-		if err := s.traverser.Traverse(ctx, ref, iterFn); err != nil {
+		if err := s.traverser.Traverse(ctx, ref, false, iterFn); err != nil {
 			return fmt.Errorf("traversal of %q failed: %w", ref, err)
 		}
 	}
 
+	s.logger.Debug("pinTrace:CreatePin: pinned", "reference", ref.String(), "traverse", traverse)
 	key := rootPinKey(ref)
 	switch err := s.rhStorage.Get(key, new(swarm.Address)); {
 	case errors.Is(err, storage.ErrNotFound):
@@ -114,6 +120,7 @@ func (s *Service) DeletePin(ctx context.Context, ref swarm.Address) error {
 			// for unpinning.
 			leaf = swarm.NewAddress(leaf.Bytes()[:swarm.HashSize])
 		}
+		s.logger.Debug("pinTrace:DeletePin: unpinned", "reference", ref.String(), "chunk", leaf.String())
 		err := s.pinStorage.Set(ctx, storage.ModeSetUnpin, leaf)
 		if err != nil {
 			iterErr = multierror.Append(err, fmt.Errorf("unable to unpin the chunk for leaf %q of root %q: %w", leaf, ref, err))
@@ -122,13 +129,14 @@ func (s *Service) DeletePin(ctx context.Context, ref swarm.Address) error {
 		return nil
 	}
 
-	if err := s.traverser.Traverse(ctx, ref, iterFn); err != nil {
+	if err := s.traverser.Traverse(ctx, ref, false, iterFn); err != nil {
 		return fmt.Errorf("traversal of %q failed: %w", ref, multierror.Append(err, iterErr))
 	}
 	if iterErr != nil {
 		return multierror.Append(ErrTraversal, iterErr)
 	}
 
+	s.logger.Debug("pinTrace:DeletePin: unpinned", "reference", ref.String())
 	key := rootPinKey(ref)
 	if err := s.rhStorage.Delete(key); err != nil {
 		return fmt.Errorf("unable to delete pin for key %q: %w", key, err)
@@ -149,14 +157,24 @@ func (s *Service) HasPin(ref swarm.Address) (bool, error) {
 }
 
 // Pins implements Interface.Pins method.
-func (s *Service) Pins() ([]swarm.Address, error) {
+func (s *Service) Pins(offset, limit int) ([]swarm.Address, error) {
 	var refs = make([]swarm.Address, 0)
 	err := s.rhStorage.Iterate(storePrefix, func(key, val []byte) (stop bool, err error) {
+		if offset > 0 {
+			offset--
+			return false, nil
+		}
 		var ref swarm.Address
 		if err := json.Unmarshal(val, &ref); err != nil {
 			return true, fmt.Errorf("invalid reference value %q: %w", string(val), err)
 		}
 		refs = append(refs, ref)
+		if (limit > 0) {
+			limit--
+			if (limit == 0) {
+				return true, nil
+			}
+		}
 		return false, nil
 	})
 	if err != nil {

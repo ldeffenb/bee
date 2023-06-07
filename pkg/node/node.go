@@ -449,7 +449,7 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 	}
 
 	// Sync the with the given Ethereum backend:
-	isSynced, _, err := transaction.IsSynced(ctx, chainBackend, maxDelay)
+	isSynced, _, _, err := transaction.IsSynced(ctx, chainBackend, maxDelay)
 	if err != nil {
 		return nil, fmt.Errorf("is synced: %w", err)
 	}
@@ -907,7 +907,7 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 
 	traversalService := traversal.New(ns)
 
-	pinningService := pinning.NewService(storer, stateStore, traversalService)
+	pinningService := pinning.NewService(storer, stateStore, traversalService, logger)
 
 	pushSyncProtocol := pushsync.New(swarmAddress, nonce, p2ps, storer, kad, batchStore, tagService, o.FullNodeMode, pssService.TryUnwrap, validStamp, logger, acc, pricer, signer, tracer, warmupTime)
 	b.pushSyncCloser = pushSyncProtocol
@@ -1036,7 +1036,7 @@ func NewBee(ctx context.Context, addr string, publicKey *ecdsa.PublicKey, signer
 	}
 
 	feedFactory := factory.New(ns)
-	steward := steward.New(storer, traversalService, retrieve, pushSyncProtocol)
+	steward := steward.New(storer, logger, traversalService, retrieve, pushSyncProtocol)
 
 	extraOpts := api.ExtraOptions{
 		Pingpong:         pingPong,

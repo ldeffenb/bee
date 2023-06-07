@@ -5,11 +5,14 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/pkg/steward"
 
 	"github.com/ethersphere/bee/pkg/jsonhttp"
+	"github.com/ethersphere/bee/pkg/resolver"
 	"github.com/gorilla/mux"
 )
 
@@ -33,6 +36,51 @@ func (s *Service) stewardshipPutHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	jsonhttp.OK(w, nil)
+}
+
+type trackResponse struct {
+	IsRetrievable bool `json:"isRetrievable"`
+	Chunks []*steward.ChunkInfo `json:"chunks"`
+}
+
+//  stewardshipTrackHandler gets detailed information about the reference and all
+// associated chunks to the network.
+func (s *Service) stewardshipTrackHandler(w http.ResponseWriter, r *http.Request) {
+	nameOrHex := mux.Vars(r)["address"]
+	address, err := s.resolveNameOrAddress(nameOrHex)
+	switch {
+	case errors.Is(err, resolver.ErrParse), errors.Is(err, resolver.ErrInvalidContentHash):
+		s.logger.Debug("stewardship put: parse address string failed", "string", nameOrHex, "error", err)
+		s.logger.Error(nil, "stewardship put: invalid address")
+		jsonhttp.BadRequest(w, "invalid address")
+		return
+	case errors.Is(err, resolver.ErrNotFound):
+		s.logger.Debug("stewardship put: address not found", "string", nameOrHex, "error", err)
+		s.logger.Error(nil, "stewardship put: address not found")
+		jsonhttp.NotFound(w, "address not found")
+		return
+	case errors.Is(err, resolver.ErrServiceNotAvailable):
+		s.logger.Debug("stewardship put: service unavailable", "string", nameOrHex, "error", err)
+		s.logger.Error(nil, "stewardship put: service unavailable")
+		jsonhttp.InternalServerError(w, "stewardship put: resolver service unavailable")
+		return
+	case err != nil:
+		s.logger.Debug("stewardship put: resolve address or name string failed", "string", nameOrHex, "error", err)
+		s.logger.Error(nil, "stewardship put: resolve address or name string failed")
+		jsonhttp.InternalServerError(w, "stewardship put: resolve name or address")
+		return
+	}
+	res, chunks, err := s.steward.Track(r.Context(), address)
+	if err != nil {
+		s.logger.Debug("stewardship track: failed", "chunk_address", address, "error", err)
+		s.logger.Error(nil, "stewardship track: failed")
+		jsonhttp.InternalServerError(w, "stewardship track: failed")
+		return
+	}
+	jsonhttp.OK(w, trackResponse{
+		IsRetrievable: res,
+		Chunks: chunks,
+	})
 }
 
 type isRetrievableResponse struct {

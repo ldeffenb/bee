@@ -112,9 +112,11 @@ func (db *DB) unpinBatchChunks(id []byte, bin uint8) (uint64, error) {
 		gcSizeChange      int64 // number to add or subtract from gcSize and reserveSize
 		totalGCSizeChange int64
 	)
+	
 	unpin := func(item shed.Item) (stop bool, err error) {
 		addr := swarm.NewAddress(item.Address)
-		c, err := db.setUnpin(batch, addr)
+		db.logger.Debug("pinTrace:UnreserveBatch: unpinned", "batch", swarm.NewAddress(id).String(), "chunk", addr.String())
+		c, err := db.setUnpin(batch, addr, 1)
 		if err != nil {
 			if !errors.Is(err, leveldb.ErrNotFound) {
 				return false, fmt.Errorf("unpin: %w", err)

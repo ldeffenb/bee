@@ -111,11 +111,11 @@ func (db *DB) ReserveSample(
 				Address: db.addressInBin(storageRadius).Bytes(),
 			},
 		})
+		stat.IterationDuration.Add(time.Since(iterationStart).Nanoseconds())
 		if err != nil {
 			logger.Error(err, "sampler: failed iteration")
 			return err
 		}
-		stat.IterationDuration.Add(time.Since(iterationStart).Nanoseconds())
 		return nil
 	})
 
@@ -240,6 +240,7 @@ func (db *DB) ReserveSample(
 		if errors.Is(err, errSamplerStopped) {
 			db.metrics.SamplerStopped.Inc()
 		}
+		logger.Error(err, "sampler failed", "stats", stat.String())
 		return storage.Sample{}, fmt.Errorf("sampler: failed creating sample: %w", err)
 	}
 
@@ -250,6 +251,7 @@ func (db *DB) ReserveSample(
 		_, err := hasher.Write(s.Bytes())
 		if err != nil {
 			db.metrics.SamplerFailedRuns.Inc()
+			logger.Error(err, "sampler root hash failed", "stats", stat.String())
 			return storage.Sample{}, fmt.Errorf("sampler: failed creating root hash of sample: %w", err)
 		}
 	}

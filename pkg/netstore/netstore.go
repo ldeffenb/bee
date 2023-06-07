@@ -82,6 +82,12 @@ func (s *store) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Addres
 	}
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, errInvalidLocalChunk) {
+
+			c, _ := s.Storer.PinCounter(addr)
+			if c > 0 {
+				s.logger.Debug("pinTrace:retrieval: ", "chunk", addr, "pinCounter", c)
+			}
+
 			// request from network
 			ch, err = s.retrieval.RetrieveChunk(ctx, addr, swarm.ZeroAddress)
 			if err != nil {

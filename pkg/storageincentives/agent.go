@@ -163,6 +163,7 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 		round, _ := a.state.currentRoundAndPhase()
 		isPhasePlayed, err := a.handleSample(ctx, round)
 		logPhaseResult(sample, round, err, isPhasePlayed)
+		a.logger.Info("produced reserve sample", "round", round)
 
 		// Sample handled could potentially take long time, therefore it could overlap with commit
 		// phase of next round. When that case happens commit event needs to be triggered once more

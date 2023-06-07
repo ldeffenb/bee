@@ -325,6 +325,9 @@ func (s *Service) mountAPI() {
 		"GET": web.ChainHandlers(
 			web.FinalHandlerFunc(s.stewardshipGetHandler),
 		),
+		"TRACK": web.ChainHandlers(
+			web.FinalHandlerFunc(s.stewardshipTrackHandler),
+		),
 		"PUT": web.ChainHandlers(
 			web.FinalHandlerFunc(s.stewardshipPutHandler),
 		),

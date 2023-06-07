@@ -284,8 +284,9 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 	defer p.metrics.HistWorkerDoneCounter.Inc()
 	defer p.histSync.Dec()
 
+	pullTotal := 0
 	loopStart := time.Now()
-	loggerV2.Debug("histSyncWorker starting", "peer_address", peer, "bin", bin, "cursor", cur)
+	p.logger.Debug("histSyncWorker starting", "peer_address", peer, "bin", bin, "cursor", cur)
 
 	sync := func() bool {
 		s, _, _, err := p.nextPeerInterval(peer, bin)
@@ -295,13 +296,14 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 			return true
 		}
 		if s > cur {
-			p.logger.Debug("histSyncWorker syncing finished", "bin", bin, "cursor", cur, "total_duration", time.Since(loopStart), "peer_address", peer)
+			p.logger.Debug("histSyncWorker syncing finished", "bin", bin, "cursor", cur, "total_duration", time.Since(loopStart), "pulled", pullTotal, "peer_address", peer)
 			return true
 		}
 
 		syncStart := time.Now()
 		ctx, cancel := context.WithTimeout(ctx, histSyncTimeout)
-		top, err := p.syncer.SyncInterval(ctx, peer, bin, s, cur)
+		top, pullCount, err := p.syncer.SyncInterval(ctx, peer, bin, s, cur)
+		pullTotal = pullTotal + pullCount
 		cancel()
 
 		if top >= s {
@@ -315,7 +317,7 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 
 		if err != nil {
 			p.metrics.HistWorkerErrCounter.Inc()
-			p.logger.Debug("histSyncWorker interval failed", "peer_address", peer, "bin", bin, "cursor", cur, "start", s, "topmost", top, "err", err)
+			p.logger.Debug("histSyncWorker syncing interval failed", "peer_address", peer, "bin", bin, "cursor", cur, "start", s, "topmost", top, "pulled", pullCount, "err", err)
 			// DeadlineExceeded err could come from any other context timeouts
 			// so we explicitly check for duration of the sync time
 			if errors.Is(err, context.DeadlineExceeded) && time.Since(syncStart) >= histSyncTimeout {
@@ -330,6 +332,7 @@ func (p *Puller) histSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 				return true
 			}
 		}
+		p.logger.Debug("histSyncWorker pulled", "bin", bin, "start", s, "topmost", top, "duration", time.Since(syncStart), "pulled", pullCount, "togo", cur-top, "peer_address", peer)
 
 		return false
 	}
@@ -371,7 +374,7 @@ func (p *Puller) liveSyncWorker(ctx context.Context, peer swarm.Address, bin uin
 		default:
 		}
 
-		top, err := p.syncer.SyncInterval(ctx, peer, bin, from, pullsync.MaxCursor)
+		top, _, err := p.syncer.SyncInterval(ctx, peer, bin, from, pullsync.MaxCursor)
 
 		if top >= from {
 			if err := p.addPeerInterval(peer, bin, from, top); err != nil {

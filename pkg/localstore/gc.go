@@ -61,6 +61,9 @@ func (db *DB) collectGarbageWorker() {
 			if err != nil {
 				db.logger.Error(err, "collect garbage failed")
 			}
+			if collectedCount > 0 {
+				db.logger.Debug("pinTrace:collectGarbageWorker: gc'd", "chunks", collectedCount)
+			}
 			// check if another gc run is needed
 			if !done {
 				db.triggerGarbageCollection()
@@ -179,6 +182,7 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 
 		storedItem, err := db.retrievalDataIndex.Get(item)
 		if err != nil {
+			db.logger.Debug("pinTrace:collectGarbage: not in retrievalDataIndex?", "chunk", swarm.NewAddress(item.Address).String())
 			if errors.Is(err, leveldb.ErrNotFound) {
 				if err = db.gcIndex.DeleteInBatch(batch, item); err != nil {
 					return 0, false, err
@@ -190,6 +194,10 @@ func (db *DB) collectGarbage() (evicted uint64, done bool, err error) {
 
 		db.metrics.GCStoreTimeStamps.Set(float64(storedItem.StoreTimestamp))
 		db.metrics.GCStoreAccessTimeStamps.Set(float64(item.AccessTimestamp))
+
+		db.logger.Debug("pinTrace:collectGarbage: Deleting",
+						"chunk", swarm.NewAddress(item.Address).String(),
+						"accessed", item.AccessTimestamp)
 
 		// delete from retrieve, pull, gc
 		err = db.retrievalDataIndex.DeleteInBatch(batch, item)
@@ -320,6 +328,10 @@ func (db *DB) reserveEvictionWorker() {
 			if err != nil {
 				db.logger.Error(err, "evict reserve failed")
 			}
+			db.metrics.EvictReserveCollectedCounter.Add(float64(evictedCount))
+			if evictedCount > 0 {
+				db.logger.Debug("pinTrace:reserveEvictionWorker: Unreserved", "chunks", evictedCount)
+			}
 
 			if !done {
 				db.triggerReserveEviction()
@@ -364,7 +376,12 @@ func (db *DB) evictReserve() (totalEvicted uint64, done bool, err error) {
 		return 0, false, err
 	}
 
-	db.logger.Debug("gc: reserve eviction", "reserve_size_start", reserveSizeStart, "target", target)
+	if reserveSizeStart == 4216767 {
+		target = reserveSizeStart
+		db.logger.Debug("gc: reserve eviction HACK!", "reserve_size_start", reserveSizeStart, "target", target)
+	} else {
+		db.logger.Debug("gc: reserve eviction", "reserve_size_start", reserveSizeStart, "target", target)
+	}
 
 	if reserveSizeStart <= target {
 		return 0, true, nil
@@ -383,6 +400,9 @@ func (db *DB) evictReserve() (totalEvicted uint64, done bool, err error) {
 		e, err := db.unreserveBatch(batchID, radius)
 		if err != nil {
 			return true, err
+		}
+		if e > 0 {
+			db.logger.Debug("pinTrace:evictReserve: Unreserved", "batch", swarm.NewAddress(batchID).String(), "chunks", e)
 		}
 		totalEvicted += e
 		if reserveSizeStart-totalEvicted <= target {
