@@ -332,7 +332,8 @@ func (s *Syncer) handler(streamCtx context.Context, p p2p.Peer, stream p2p.Strea
 	if err != nil {
 		return fmt.Errorf("make offer: %w", err)
 	}
-
+	s.metrics.OutboundOffered.Add(float64(len(offer.Chunks)))
+	
 	// recreate the reader to allow the first one to be garbage collected
 	// before the makeOffer function call, to reduce the total memory allocated
 	// while makeOffer is executing (waiting for the new chunks)
@@ -483,6 +484,7 @@ func (s *Syncer) processWant(ctx context.Context, o *pb.Offer, w *pb.Want) ([]sw
 			if err != nil {
 				return nil, err
 			}
+			s.metrics.OutboundWanted.Inc()
 			chunks = append(chunks, c)
 		}
 	}
