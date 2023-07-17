@@ -7,7 +7,6 @@ package node
 import (
 	"errors"
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 	"path/filepath"
 
 	"github.com/ethersphere/bee/pkg/log"
@@ -29,12 +28,15 @@ func InitStateStore(logger log.Logger, dataDir string, cacheCapacity uint64) (st
 	} else {
 		dataDir = filepath.Join(dataDir, "statestore")
 	}
-	ldb, err := leveldbstore.New(dataDir, &opt.Options{Compression: opt.NoCompression})
+	ldb, err := leveldbstore.New(dataDir, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	caching := cache.Wrap(ldb, int(cacheCapacity))
+	caching, err := cache.Wrap(ldb, int(cacheCapacity))
+	if err != nil {
+		return nil, nil, err
+	}
 	stateStore, err := storeadapter.NewStateStorerAdapter(caching)
 
 	return stateStore, caching, err
@@ -49,7 +51,7 @@ func InitStamperStore(logger log.Logger, dataDir string, stateStore storage.Stat
 	} else {
 		dataDir = filepath.Join(dataDir, "stamperstore")
 	}
-	stamperStore, err := leveldbstore.New(dataDir, &opt.Options{Compression: opt.NoCompression})
+	stamperStore, err := leveldbstore.New(dataDir, nil)
 	if err != nil {
 		return nil, err
 	}
