@@ -65,23 +65,30 @@ func (db *DB) startReserveWorkers(
 	}
 
 	initialRadius := db.reserve.Radius()
-
+	db.logger.Info("initalRadius", "radius", initialRadius)
+	
 	// possibly a fresh node, acquire initial radius externally
-	if initialRadius == 0 {
+	if initialRadius <= 8 {
 		r, err := radius()
 		if err != nil {
 			db.logger.Error(err, "reserve worker initial radius")
 		} else {
 			initialRadius = r
+			db.logger.Info("externalRadius", "radius", initialRadius)
 		}
 	}
 
+	db.logger.Info("reserve.SetRadius", "radius", initialRadius)
 	if err := db.reserve.SetRadius(db.repo.IndexStore(), initialRadius); err != nil {
 		db.logger.Error(err, "reserve set radius")
 	}
 
+	db.logger.Warning("startReserveWorkers NOT starting syncer (puller)")
 	// syncing can now begin now that the reserver worker is running
-	db.syncer.Start(ctx)
+	//db.syncer.Start(ctx)
+	
+	db.logger.Warning("startRserveWorkers TRIGGERING reserveOverCapacity")
+	db.events.Trigger(reserveOverCapacity)
 
 	db.inFlight.Add(1)
 	go db.radiusWorker(ctx, wakeUpDur)
@@ -374,6 +381,20 @@ func (db *DB) unreserve(ctx context.Context) (err error) {
 			case <-batchExpiry:
 				return nil
 			default:
+			}
+			
+			if hex.EncodeToString(b) == "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df" {
+				for r := uint8(0); r < radius; r++ {
+					db.logger.Info("unreserve OSM batch", "r", r, "radius", radius)
+					binEvicted, err := db.evictBatch(ctx, b, r)
+					// eviction happens in batches, so we need to keep track of the total
+					// number of chunks evicted even if there was an error
+					totalEvicted += binEvicted
+					db.logger.Info("unreserve OSM batch", "r", r, "radius", radius, "evicted", binEvicted)
+					if err != nil {
+						return err
+					}
+				}
 			}
 
 			binEvicted, err := db.evictBatch(ctx, b, radius)

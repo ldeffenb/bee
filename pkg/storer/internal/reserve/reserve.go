@@ -303,6 +303,8 @@ func (r *Reserve) EvictBatchBin(
 
 	var evicted []*BatchRadiusItem
 
+	r.logger.Info("EvictBatchBin", "batch", hex.EncodeToString(batchID), "bin", bin)
+
 	err := txExecutor.Execute(ctx, func(store internal.Storage) error {
 		return store.IndexStore().Iterate(storage.Query{
 			Factory: func() storage.Item { return &BatchRadiusItem{} },
@@ -323,11 +325,15 @@ func (r *Reserve) EvictBatchBin(
 	batchCnt := 1000
 	evictionCompleted := 0
 
+	r.logger.Info("EvictBatchBin", "batch", hex.EncodeToString(batchID), "bin", bin, "evicting", len(evicted), "by", batchCnt)
+
 	for i := 0; i < len(evicted); i += batchCnt {
 		end := i + batchCnt
 		if end > len(evicted) {
 			end = len(evicted)
 		}
+
+		r.logger.Info("EvictBatchBin", "batch", hex.EncodeToString(batchID), "bin", bin, "evicting", len(evicted), "from", i, "to", end)
 
 		moveToCache := make([]swarm.Address, 0, end-i)
 
