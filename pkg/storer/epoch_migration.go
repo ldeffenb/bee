@@ -97,6 +97,7 @@ type sharkyRecover interface {
 func epochMigration(
 	ctx context.Context,
 	path string,
+	baseAddr swarm.Address,
 	stateStore storage.StateStorer,
 	store storage.BatchedStore,
 	reserve reservePutter,
@@ -140,6 +141,7 @@ func epochMigration(
 	logger.Debug("index counts", "retrieval index", chunkCount, "pull index", pullIdxCnt)
 
 	e := &epochMigrator{
+		baseAddr:           baseAddr,
 		stateStore:         stateStore,
 		store:              store,
 		recovery:           recovery,
@@ -260,6 +262,7 @@ func initShedIndexes(dbshed *shed.DB, baseAddress swarm.Address) (pullIndex shed
 // the main logic of the migration so that it can be tested. Also it houses the
 // dependencies of the migration logic.
 type epochMigrator struct {
+	baseAddr		   swarm.Address
 	stateStore         storage.StateStorer
 	store              storage.BatchedStore
 	recovery           sharkyRecover
@@ -267,6 +270,7 @@ type epochMigrator struct {
 	pullIndex          shed.Index
 	retrievalDataIndex shed.Index
 	logger             log.Logger
+	outOfRadiusChunks  int
 }
 
 func (e *epochMigrator) migrateReserve(ctx context.Context) error {
@@ -276,7 +280,7 @@ func (e *epochMigrator) migrateReserve(ctx context.Context) error {
 		loc   sharky.Location
 	}
 
-	e.logger.Debug("migrating reserve contents")
+	e.logger.Debug("migrating reserve contents from pullIndex")
 
 	opChan := make(chan putOp, 4)
 	eg, egCtx := errgroup.WithContext(ctx)
@@ -307,12 +311,18 @@ func (e *epochMigrator) migrateReserve(ctx context.Context) error {
 			}
 		})
 	}
-
+	
 	err := func() error {
 		defer close(opChan)
 
 		return e.pullIndex.Iterate(func(i shed.Item) (stop bool, err error) {
 			addr := swarm.NewAddress(i.Address)
+
+			po := swarm.Proximity(e.baseAddr.Bytes(), addr.Bytes())
+			if po < 8 {
+				e.outOfRadiusChunks++
+				return false, nil //continue without this outside-of-radius chunk
+			}
 
 			item, err := e.retrievalDataIndex.Get(i)
 			if err != nil {
@@ -352,7 +362,7 @@ func (e *epochMigrator) migrateReserve(ctx context.Context) error {
 		return err
 	}
 
-	e.logger.Debug("migrating reserve contents done", "reserve_size", e.reserve.Size())
+	e.logger.Debug("migrating reserve contents done", "reserve_size", e.reserve.Size(), "out_of_radius", e.outOfRadiusChunks)
 
 	return nil
 }
@@ -439,7 +449,7 @@ func (e *epochMigrator) migratePinning(ctx context.Context) error {
 					}
 
 					err = func() error {
-						if err := traverser.Traverse(egCtx, addr, traverserFn); err != nil {
+						if err := traverser.Traverse(egCtx, addr, false, traverserFn); err != nil {
 							return err
 						}
 

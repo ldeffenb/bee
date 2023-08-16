@@ -424,7 +424,7 @@ func performEpochMigration(ctx context.Context, basePath string, opts *Options) 
 		}
 	}()
 
-	return epochMigration(ctx, basePath, opts.StateStore, store, rs, sharkyRecover, logger)
+	return epochMigration(ctx, basePath, opts.Address, opts.StateStore, store, rs, sharkyRecover, logger)
 }
 
 const lockKeyNewSession string = "new_session"
