@@ -179,7 +179,7 @@ func (c *ChunkStoreWrapper) Get(ctx context.Context, addr swarm.Address) (swarm.
 //	Slot   uint32
 //	Length uint16
 //}
-		c.logger.Debug("chunkTrace: chunkStore.Get invalid chunk", "address", addr, "err", err)
+		c.logger.Debug("chunkTrace: chunkStore.Get invalid chunk", "address", addr, "timestamp", time.Unix(int64(rIdx.Timestamp), 0), "err", err)
 		return nil, fmt.Errorf("chunk store: read invalid chunk at address %s loc %s ref %d: %w",
 								addr, rIdx.Location.ToString(), rIdx.RefCnt, err)
 	}
