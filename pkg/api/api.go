@@ -287,6 +287,10 @@ func New(
 			buf, err := base64.URLEncoding.DecodeString(v)
 			return string(buf), err
 		},
+		"decHex": func(v string) (string, error) {
+			buf, err := hex.DecodeString(v)
+			return string(buf), err
+		},
 	}
 	s.validate = validator.New()
 	s.validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
