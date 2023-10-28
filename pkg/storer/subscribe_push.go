@@ -75,6 +75,12 @@ func (db *DB) SubscribePush(ctx context.Context) (<-chan swarm.Chunk, func()) {
 				// again. This trigger ensures that we perform the iteration on the
 				// latest snapshot.
 				db.logger.Error(err, "subscribe push: upload.Iterate error, retriggering")
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+				}
 				db.events.Trigger(subscribePushEventKey)
 			}
 
