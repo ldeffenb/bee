@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethersphere/bee/pkg/topology"
 	"net/http"
 	"path"
 	"path/filepath"
@@ -21,6 +20,8 @@ import (
 	"github.com/ethersphere/bee/pkg/feeds"
 	"github.com/ethersphere/bee/pkg/file/joiner"
 	"github.com/ethersphere/bee/pkg/file/loadsave"
+	"github.com/ethersphere/bee/pkg/file/redundancy"
+	"github.com/ethersphere/bee/pkg/file/redundancy/getter"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/log"
 	"github.com/ethersphere/bee/pkg/manifest"
@@ -28,6 +29,7 @@ import (
 	storage "github.com/ethersphere/bee/pkg/storage"
 	storer "github.com/ethersphere/bee/pkg/storer"
 	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/pkg/topology"
 	"github.com/ethersphere/bee/pkg/tracing"
 	"github.com/ethersphere/langos"
 	"github.com/gorilla/mux"
@@ -37,13 +39,14 @@ func (s *Service) bzzUploadHandler(w http.ResponseWriter, r *http.Request) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger.WithName("post_bzz").Build())
 
 	headers := struct {
-		ContentType string `map:"Content-Type,mimeMediaType" validate:"required"`
-		BatchID     []byte `map:"Swarm-Postage-Batch-Id" validate:"required"`
-		SwarmTag    uint64 `map:"Swarm-Tag"`
-		Pin         bool   `map:"Swarm-Pin"`
-		Deferred    *bool  `map:"Swarm-Deferred-Upload"`
-		Encrypt     bool   `map:"Swarm-Encrypt"`
-		IsDir       bool   `map:"Swarm-Collection"`
+		ContentType string           `map:"Content-Type,mimeMediaType" validate:"required"`
+		BatchID     []byte           `map:"Swarm-Postage-Batch-Id" validate:"required"`
+		SwarmTag    uint64           `map:"Swarm-Tag"`
+		Pin         bool             `map:"Swarm-Pin"`
+		Deferred    *bool            `map:"Swarm-Deferred-Upload"`
+		Encrypt     bool             `map:"Swarm-Encrypt"`
+		IsDir       bool             `map:"Swarm-Collection"`
+		RLevel      redundancy.Level `map:"Swarm-Redundancy-Level"`
 	}{}
 	if response := s.mapStructure(r.Header, &headers); response != nil {
 		response("invalid header params", logger, w)
@@ -102,10 +105,10 @@ func (s *Service) bzzUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if headers.IsDir || headers.ContentType == multiPartFormData {
-		s.dirUploadHandler(logger, ow, r, putter, r.Header.Get(ContentTypeHeader), headers.Encrypt, tag)
+		s.dirUploadHandler(logger, ow, r, putter, r.Header.Get(ContentTypeHeader), headers.Encrypt, tag, headers.RLevel)
 		return
 	}
-	s.fileUploadHandler(logger, ow, r, putter, headers.Encrypt, tag)
+	s.fileUploadHandler(logger, ow, r, putter, headers.Encrypt, tag, headers.RLevel)
 }
 
 // fileUploadResponse is returned when an HTTP request to upload a file is successful
@@ -122,6 +125,7 @@ func (s *Service) fileUploadHandler(
 	putter storer.PutterSession,
 	encrypt bool,
 	tagID uint64,
+	rLevel redundancy.Level,
 ) {
 	queries := struct {
 		FileName string `map:"name" validate:"startsnotwith=/"`
@@ -131,7 +135,7 @@ func (s *Service) fileUploadHandler(
 		return
 	}
 
-	p := requestPipelineFn(putter, encrypt)
+	p := requestPipelineFn(putter, encrypt, rLevel)
 	ctx := r.Context()
 
 	// first store the file and get its reference
@@ -171,8 +175,8 @@ func (s *Service) fileUploadHandler(
 		}
 	}
 
-	factory := requestPipelineFactory(ctx, putter, encrypt)
-	l := loadsave.New(s.storer.ChunkStore(), factory)
+	factory := requestPipelineFactory(ctx, putter, encrypt, rLevel)
+	l := loadsave.New(s.storer.ChunkStore(), s.storer.Cache(), factory)
 
 	m, err := manifest.NewDefaultManifest(l, encrypt)
 	if err != nil {
@@ -455,7 +459,10 @@ func (s *Service) serveManifestEntry(
 // downloadHandler contains common logic for dowloading Swarm file from API
 func (s *Service) downloadHandler(logger log.Logger, w http.ResponseWriter, r *http.Request, reference swarm.Address, additionalHeaders http.Header, etag bool) {
 	headers := struct {
-		Cache *bool `map:"Swarm-Cache"`
+		Cache                 *bool           `map:"Swarm-Cache"`
+		Strategy              getter.Strategy `map:"Swarm-Redundancy-Strategy"`
+		FallbackMode          bool            `map:"Swarm-Redundancy-Fallback-Mode"`
+		ChunkRetrievalTimeout time.Duration   `map:"Swarm-Chunk-Retrieval-Timeout"`
 	}{}
 	if response := s.mapStructure(r.Header, &headers); response != nil {
 		response("invalid header params", logger, w)
@@ -465,7 +472,12 @@ func (s *Service) downloadHandler(logger log.Logger, w http.ResponseWriter, r *h
 	if headers.Cache != nil {
 		cache = *headers.Cache
 	}
-	reader, l, err := joiner.New(r.Context(), s.storer.Download(cache), reference)
+
+	ctx := r.Context()
+	ctx = getter.SetStrategy(ctx, headers.Strategy)
+	ctx = getter.SetStrict(ctx, headers.FallbackMode)
+	ctx = getter.SetFetchTimeout(ctx, headers.ChunkRetrievalTimeout)
+	reader, l, err := joiner.New(ctx, s.storer.Download(cache), s.storer.Cache(), reference)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, topology.ErrNotFound) {
 			logger.Debug("api download: not found ", "address", reference, "error", err)
