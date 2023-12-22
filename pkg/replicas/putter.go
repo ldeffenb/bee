@@ -28,9 +28,9 @@ func NewPutter(p storage.Putter) storage.Putter {
 }
 
 // Put makes the getter satisfy the storage.Getter interface
-func (p *putter) Put(ctx context.Context, ch swarm.Chunk) (err error) {
+func (p *putter) Put(ctx context.Context, ch swarm.Chunk, why string) (err error) {
 	rlevel := GetLevelFromContext(ctx)
-	errs := []error{p.putter.Put(ctx, ch)}
+	errs := []error{p.putter.Put(ctx, ch, "replicas.put0("+why+")")}
 	if rlevel == 0 {
 		return errs[0]
 	}
@@ -45,7 +45,7 @@ func (p *putter) Put(ctx context.Context, ch swarm.Chunk) (err error) {
 			defer wg.Done()
 			sch, err := soc.New(r.id, ch).Sign(signer)
 			if err == nil {
-				err = p.putter.Put(ctx, sch)
+				err = p.putter.Put(ctx, sch, "replicas.put("+why+")")
 			}
 			errc <- err
 		}()

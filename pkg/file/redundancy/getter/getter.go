@@ -211,7 +211,7 @@ func (g *decoder) recover(ctx context.Context) error {
 // save iterate over reconstructed shards and puts the corresponding chunks to local storage
 func (g *decoder) save(ctx context.Context, missing []int) error {
 	for _, i := range missing {
-		if err := g.putter.Put(ctx, swarm.NewChunk(g.addrs[i], g.rsbuf[i])); err != nil {
+		if err := g.putter.Put(ctx, swarm.NewChunk(g.addrs[i], g.rsbuf[i]), "redundancy.Getter.save"); err != nil {
 			return err
 		}
 	}
