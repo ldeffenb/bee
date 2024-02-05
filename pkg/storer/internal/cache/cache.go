@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/ethersphere/bee/pkg/storage/leveldbstore"
 	"github.com/ethersphere/bee/pkg/storer/internal"
 	"github.com/ethersphere/bee/pkg/swarm"
+	"resenje.org/multex"
 )
 
 var now = time.Now
@@ -38,8 +40,10 @@ var (
 // part of the reserve but are potentially useful to store for obtaining bandwidth
 // incentives.
 type Cache struct {
-	size     atomic.Int64
-	capacity int
+	size      atomic.Int64
+	capacity  int
+	chunkLock *multex.Multex // protects storage ops at chunk level
+	glock     sync.RWMutex   // blocks Get and Put ops while shallow copy is running.
 }
 
 // New creates a new Cache component with the specified capacity. The store is used
@@ -53,6 +57,7 @@ func New(ctx context.Context, store internal.Storage, capacity uint64) (*Cache, 
 
 	c := &Cache{capacity: int(capacity)}
 	c.size.Store(int64(count))
+	c.chunkLock = multex.New()
 
 	return c, nil
 }
@@ -105,6 +110,11 @@ func IterateCachedChunks(st storage.Store, callBackFunc func(address swarm.Addre
 // chunkstore and also adds a Cache entry for the chunk.
 func (c *Cache) Putter(store internal.Storage) storage.Putter {
 	return storage.PutterFunc(func(ctx context.Context, chunk swarm.Chunk, why string) error {
+
+		c.chunkLock.Lock(chunk.Address().ByteString())
+		defer c.chunkLock.Unlock(chunk.Address().ByteString())
+		c.glock.RLock()
+		defer c.glock.RUnlock()
 
 		newEntry := &cacheEntry{Address: chunk.Address()}
 		found, err := store.IndexStore().Has(newEntry)
@@ -163,6 +173,11 @@ func (c *Cache) Getter(store internal.Storage) storage.Getter {
 			return nil, err
 		}
 
+		c.chunkLock.Lock(address.ByteString())
+		defer c.chunkLock.Unlock(address.ByteString())
+		c.glock.RLock()
+		defer c.glock.RUnlock()
+
 		// check if there is an entry in Cache. As this is the download path, we do
 		// a best-effort operation. So in case of any error we return the chunk.
 		entry := &cacheEntry{Address: address}
@@ -217,33 +232,41 @@ func (c *Cache) ShallowCopy(
 	addrs ...swarm.Address,
 ) (err error) {
 
+	c.glock.Lock()
+	defer c.glock.Unlock()
+
+	entries := make([]*cacheEntry, 0, len(addrs))
+
 	defer func() {
 		if err != nil {
-			for _, addr := range addrs {
-				err = errors.Join(store.ChunkStore().Delete(context.Background(), addr, "Cache.ShallowCopy-err"))
+			for _, entry := range entries {
+				err = errors.Join(store.ChunkStore().Delete(context.Background(), entry.Address, "Cache.ShallowCopy-err"))
 			}
 		}
 	}()
 
-	//consider only the amount that can fit, the rest should be deleted from the chunkstore.
-	if len(addrs) > c.capacity {
-		for _, addr := range addrs[:len(addrs)-c.capacity] {
-			_ = store.ChunkStore().Delete(ctx, addr, "Cache.ShallowCopy-overflow")
-		}
-		addrs = addrs[len(addrs)-c.capacity:]
-	}
-
-	entriesToAdd := make([]*cacheEntry, 0, len(addrs))
 	for _, addr := range addrs {
 		entry := &cacheEntry{Address: addr, AccessTimestamp: now().UnixNano()}
 		if has, err := store.IndexStore().Has(entry); err == nil && has {
+			// Since the caller has previously referenced the chunk (+1 refCnt), and if the chunk is already referenced
+			// by the cache store (+1 refCnt), then we must decrement the refCnt by one ( -1 refCnt to bring the total to +1).
+			// See https://github.com/ethersphere/bee/issues/4530.
+			_ = store.ChunkStore().Delete(ctx, addr, "Cache.ShallowCopy")
 			continue
 		}
-		entriesToAdd = append(entriesToAdd, entry)
+		entries = append(entries, entry)
 	}
 
-	if len(entriesToAdd) == 0 {
+	if len(entries) == 0 {
 		return nil
+	}
+
+	//consider only the amount that can fit, the rest should be deleted from the chunkstore.
+	if len(entries) > c.capacity {
+		for _, addr := range entries[:len(entries)-c.capacity] {
+			_ = store.ChunkStore().Delete(ctx, addr.Address, "Cache.ShallowCopy-overflow")
+		}
+		entries = entries[len(entries)-c.capacity:]
 	}
 
 	batch, err := store.IndexStore().Batch(ctx)
@@ -251,7 +274,7 @@ func (c *Cache) ShallowCopy(
 		return fmt.Errorf("failed creating batch: %w", err)
 	}
 
-	for _, entry := range entriesToAdd {
+	for _, entry := range entries {
 		err = batch.Put(entry)
 		if err != nil {
 			return fmt.Errorf("failed adding entry %s: %w", entry, err)
@@ -269,7 +292,7 @@ func (c *Cache) ShallowCopy(
 		return fmt.Errorf("batch commit: %w", err)
 	}
 
-	c.size.Add(int64(len(entriesToAdd)))
+	c.size.Add(int64(len(entries)))
 
 	return nil
 }
@@ -285,6 +308,9 @@ func (c *Cache) RemoveOldest(
 	if count <= 0 {
 		return nil
 	}
+
+	// we are okay to not lock here because RemoveOldest removes entries from the beginning of the list
+	// while all the functions above adds new entries.
 
 	evictItems := make([]*cacheEntry, 0, count)
 	err := store.IndexStore().Iterate(

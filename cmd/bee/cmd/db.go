@@ -26,8 +26,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const optionNameValidation = "validate"
-const optionNameRepair = "repair"
+const (
+	optionNameValidation     = "validate"
+	optionNameRepair         = "repair"
+	optionNameValidationPin  = "validate-pin"
+	optionNameCollectionPin  = "pin"
+	optionNameOutputLocation = "output"
+)
 
 func (c *command) initDBCmd() {
 	cmd := &cobra.Command{
@@ -43,6 +48,7 @@ func (c *command) initDBCmd() {
 	dbFixRefCntCmd(cmd)
 	dbFixSharkyCmd(cmd)
 	dbValidateCmd(cmd)
+	dbValidatePinsCmd(cmd)
 
 	c.root.AddCommand(cmd)
 }
@@ -191,7 +197,6 @@ func dbFixRefCntCmd(cmd *cobra.Command) {
 			if dataDir == "" {
 				return errors.New("no data-dir provided")
 			}
-
 			repair, err := cmd.Flags().GetBool(optionNameRepair)
 			if err != nil {
 				return fmt.Errorf("get repair: %w", err)
@@ -286,7 +291,6 @@ func dbFixSharkyCmd(cmd *cobra.Command) {
 			}
 
 			localstorePath := path.Join(dataDir, "localstore")
-
 			err = storer.FixSharky(context.Background(), localstorePath, &storer.Options{
 				Logger:          logger,
 				RadiusSetter:    noopRadiusSetter{},
@@ -304,6 +308,62 @@ func dbFixSharkyCmd(cmd *cobra.Command) {
 	c.Flags().String(optionNameVerbosity, "info", "verbosity level")
 	c.Flags().Bool(optionNameRepair, false, "actually (attempt to) FIX any discovered inconsistencies")
 	c.Flags().Bool(optionNameValidation, false, "run chunk validation checks again after any repairs")
+	cmd.AddCommand(c)
+}
+		
+func dbValidatePinsCmd(cmd *cobra.Command) {
+	c := &cobra.Command{
+		Use:   "validate-pin",
+		Short: "Validates pin collection chunks with sharky store.",
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			v, err := cmd.Flags().GetString(optionNameVerbosity)
+			if err != nil {
+				return fmt.Errorf("get verbosity: %w", err)
+			}
+			v = strings.ToLower(v)
+			logger, err := newLogger(cmd, v)
+			if err != nil {
+				return fmt.Errorf("new logger: %w", err)
+			}
+
+			dataDir, err := cmd.Flags().GetString(optionNameDataDir)
+			if err != nil {
+				return fmt.Errorf("get data-dir: %w", err)
+			}
+			if dataDir == "" {
+				return errors.New("no data-dir provided")
+			}
+
+			providedPin, err := cmd.Flags().GetString(optionNameCollectionPin)
+			if err != nil {
+				return fmt.Errorf("read pin option: %w", err)
+			}
+
+			outputLoc, err := cmd.Flags().GetString(optionNameOutputLocation)
+			if err != nil {
+				return fmt.Errorf("read location option: %w", err)
+
+			}
+
+			localstorePath := path.Join(dataDir, "localstore")
+
+			err = storer.ValidatePinCollectionChunks(context.Background(), localstorePath, providedPin, outputLoc, &storer.Options{
+				Logger:          logger,
+				RadiusSetter:    noopRadiusSetter{},
+				Batchstore:      new(postage.NoOpBatchStore),
+				ReserveCapacity: node.ReserveCapacity,
+			})
+			if err != nil {
+				return fmt.Errorf("localstore: %w", err)
+			}
+
+			return nil
+		},
+	}
+	c.Flags().String(optionNameDataDir, "", "data directory")
+	c.Flags().String(optionNameVerbosity, "info", "verbosity level")
+	c.Flags().String(optionNameCollectionPin, "", "only validate given pin")
+	c.Flags().String(optionNameOutputLocation, "", "location and name of the output file")
 	cmd.AddCommand(c)
 }
 
