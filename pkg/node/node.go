@@ -1091,6 +1091,7 @@ func NewBee(
 		Steward:         steward,
 		SyncStatus:      syncStatusFn,
 		NodeStatus:      nodeStatus,
+		PullSync:		 pullSyncProtocol,
 	}
 
 	if o.APIAddr != "" {

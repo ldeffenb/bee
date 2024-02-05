@@ -402,6 +402,10 @@ func (s *Service) mountBusinessDebug(restricted bool) {
 		"DELETE": http.HandlerFunc(s.peerDisconnectHandler),
 	})
 
+	handle("/cursors/{address}", jsonhttp.MethodHandler{
+		"GET": http.HandlerFunc(s.peerCursorsHandler),
+	})
+
 	handle("/chunks/{address}", jsonhttp.MethodHandler{
 		"GET": http.HandlerFunc(s.hasChunkHandler),
 	})
