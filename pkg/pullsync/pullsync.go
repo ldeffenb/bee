@@ -243,7 +243,7 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 		chunk, err := s.validStamp(newChunk.WithStamp(stamp))
 		if err != nil {
 			s.logger.Debug("unverified stamp", "error", err, "peer_address", peer, "chunk_address", newChunk)
-			chunkErr = errors.Join(chunkErr, err)
+//			chunkErr = errors.Join(chunkErr, err)	// Don't return this error!   It's as if the chunk was never offered
 			continue
 		}
 
@@ -251,7 +251,7 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 //			go s.unwrap(chunk)
 		} else if !soc.Valid(chunk) {
 			s.logger.Debug("invalid cac/soc chunk", "error", swarm.ErrInvalidChunk, "peer_address", peer, "chunk", chunk)
-			chunkErr = errors.Join(chunkErr, swarm.ErrInvalidChunk)
+//			chunkErr = errors.Join(chunkErr, swarm.ErrInvalidChunk)	// Don't return this error!   It's as if the chunk was never offered
 			s.metrics.ReceivedInvalidChunk.Inc()
 			continue
 		}
