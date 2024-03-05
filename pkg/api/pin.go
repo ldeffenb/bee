@@ -91,7 +91,7 @@ func (s *Service) pinRootHash(w http.ResponseWriter, r *http.Request) {
 				logger.Debug("pin root hash: pre-get", "reference", paths.Reference, "address", address)
 				chunk, err := getter.Get(r.Context(), address)
 				if err != nil {
-					logger.Debug("pin root hash: failed to get", "address", address, "error", err)
+					logger.Debug("pin root hash: failed to get", "reference", paths.Reference, "address", address, "error", err)
 					return
 				}
 				logger.Debug("pin root hash: post-get", "reference", paths.Reference, "address", address)
@@ -111,7 +111,7 @@ func (s *Service) pinRootHash(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	if err := errors.Join(err, errTraverse); err != nil {
-		logger.Error(errors.Join(err, putter.Cleanup()), "pin collection failed")
+		logger.Error(errors.Join(err, putter.Cleanup()), "pin collection failed", "reference", paths.Reference)
 		if errors.Is(err, storage.ErrNotFound) {
 			jsonhttp.NotFound(w, "pin collection failed")
 			return
