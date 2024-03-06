@@ -299,18 +299,15 @@ func (c *Cache) ShallowCopy(
 
 // RemoveOldest removes the oldest cache entries from the store. The count
 // specifies the number of entries to remove.
-func (c *Cache) RemoveOldest(
-	ctx context.Context,
-	store internal.Storage,
-	chStore storage.ChunkStore,
-	count uint64,
-) error {
+func (c *Cache) RemoveOldest(ctx context.Context, store internal.Storage, chStore storage.ChunkStore, count uint64) error {
+	return c.removeOldest(ctx, store, store.ChunkStore(), count, 1000)
+}
+
+func (c *Cache) removeOldest(ctx context.Context, store internal.Storage, chStore storage.ChunkStore, count uint64, batchCnt int) error {
+
 	if count <= 0 {
 		return nil
 	}
-
-	// we are okay to not lock here because RemoveOldest removes entries from the beginning of the list
-	// while all the functions above adds new entries.
 
 	evictItems := make([]*cacheEntry, 0, count)
 	err := store.IndexStore().Iterate(
@@ -336,7 +333,8 @@ func (c *Cache) RemoveOldest(
 		return fmt.Errorf("failed iterating over cache order index: %w", err)
 	}
 
-	batchCnt := 1_000
+	c.glock.Lock()
+	defer c.glock.Unlock()
 
 	for i := 0; i < len(evictItems); i += batchCnt {
 		end := i + batchCnt
@@ -372,7 +370,7 @@ func (c *Cache) RemoveOldest(
 			return err
 		}
 
-		c.size.Add(-int64(len(evictItems)))
+		c.size.Add(-int64(end - i))
 	}
 
 	return nil

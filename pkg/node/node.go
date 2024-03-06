@@ -146,7 +146,6 @@ type Options struct {
 	BootnodeMode                  bool
 	BlockchainRpcEndpoint         string
 	SwapFactoryAddress            string
-	SwapLegacyFactoryAddresses    []string
 	SwapInitialDeposit            string
 	SwapEnable                    bool
 	ChequebookEnable              bool
@@ -172,6 +171,7 @@ type Options struct {
 	EnableStorageIncentives       bool
 	StatestoreCacheCapacity       uint64
 	TargetNeighborhood            string
+	NeighborhoodSuggester         string
 }
 
 const (
@@ -283,9 +283,18 @@ func NewBee(
 
 	if !nonceExists {
 		// mine the overlay
-		if o.TargetNeighborhood != "" {
-			logger.Info("mining an overlay address for the fresh node to target the selected neighborhood", "target", o.TargetNeighborhood)
-			swarmAddress, nonce, err = nbhdutil.MineOverlay(ctx, *pubKey, networkID, o.TargetNeighborhood)
+		targetNeighborhood := o.TargetNeighborhood
+		if o.TargetNeighborhood == "" && o.NeighborhoodSuggester != "" {
+			logger.Info("fetching target neighborhood from suggester", "url", o.NeighborhoodSuggester)
+			targetNeighborhood, err = nbhdutil.FetchNeighborhood(&http.Client{}, o.NeighborhoodSuggester)
+			if err != nil {
+				return nil, fmt.Errorf("neighborhood suggestion: %w", err)
+			}
+		}
+
+		if targetNeighborhood != "" {
+			logger.Info("mining an overlay address for the fresh node to target the selected neighborhood", "target", targetNeighborhood)
+			swarmAddress, nonce, err = nbhdutil.MineOverlay(ctx, *pubKey, networkID, targetNeighborhood)
 			if err != nil {
 				return nil, fmt.Errorf("mine overlay address: %w", err)
 			}
@@ -504,20 +513,9 @@ func NewBee(
 	}
 
 	if o.SwapEnable {
-		chequebookFactory, err = InitChequebookFactory(
-			logger,
-			chainBackend,
-			chainID,
-			transactionService,
-			o.SwapFactoryAddress,
-			o.SwapLegacyFactoryAddresses,
-		)
+		chequebookFactory, err = InitChequebookFactory(logger, chainBackend, chainID, transactionService, o.SwapFactoryAddress)
 		if err != nil {
 			return nil, err
-		}
-
-		if err = chequebookFactory.VerifyBytecode(ctx); err != nil {
-			return nil, fmt.Errorf("factory fail: %w", err)
 		}
 
 		erc20Address, err := chequebookFactory.ERC20Address(ctx)
@@ -1070,7 +1068,7 @@ func NewBee(
 	b.resolverCloser = multiResolver
 
 	feedFactory := factory.New(localStore.Download(true))
-	steward := steward.New(localStore, retrieval)
+	steward := steward.New(localStore, retrieval, localStore.Cache())
 
 	extraOpts := api.ExtraOptions{
 		Pingpong:        pingPong,
@@ -1092,6 +1090,7 @@ func NewBee(
 		SyncStatus:      syncStatusFn,
 		NodeStatus:      nodeStatus,
 		PullSync:		 pullSyncProtocol,
+		PinIntegrity:    localStore.PinIntegrity(),
 	}
 
 	if o.APIAddr != "" {

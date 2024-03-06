@@ -31,6 +31,7 @@ import (
 	"github.com/ethersphere/bee/pkg/feeds"
 	"github.com/ethersphere/bee/pkg/file/pipeline"
 	"github.com/ethersphere/bee/pkg/file/pipeline/builder"
+	"github.com/ethersphere/bee/pkg/file/redundancy"
 	"github.com/ethersphere/bee/pkg/jsonhttp/jsonhttptest"
 	"github.com/ethersphere/bee/pkg/log"
 	p2pmock "github.com/ethersphere/bee/pkg/p2p/mock"
@@ -130,6 +131,7 @@ type testServerOptions struct {
 	BeeMode             api.BeeNodeMode
 	RedistributionAgent *storageincentives.Agent
 	NodeStatus          *status.Service
+	PinIntegrity        api.PinIntegrity
 }
 
 func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.Conn, string, *chanStorer) {
@@ -200,6 +202,7 @@ func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.
 		SyncStatus:      o.SyncStatus,
 		Staking:         o.StakingContract,
 		NodeStatus:      o.NodeStatus,
+		PinIntegrity:    o.PinIntegrity,
 	}
 
 	// By default bee mode is set to full mode.
@@ -321,9 +324,9 @@ func request(t *testing.T, client *http.Client, method, resource string, body io
 	return resp
 }
 
-func pipelineFactory(s storage.Putter, encrypt bool) func() pipeline.Interface {
+func pipelineFactory(s storage.Putter, encrypt bool, rLevel redundancy.Level) func() pipeline.Interface {
 	return func() pipeline.Interface {
-		return builder.NewPipelineBuilder(context.Background(), s, encrypt)
+		return builder.NewPipelineBuilder(context.Background(), s, encrypt, rLevel)
 	}
 }
 

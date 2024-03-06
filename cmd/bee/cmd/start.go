@@ -313,7 +313,6 @@ func buildBeeNode(ctx context.Context, c *command, cmd *cobra.Command, logger lo
 		BootnodeMode:                  bootNode,
 		BlockchainRpcEndpoint:         blockchainRpcEndpoint,
 		SwapFactoryAddress:            c.config.GetString(optionNameSwapFactoryAddress),
-		SwapLegacyFactoryAddresses:    c.config.GetStringSlice(optionNameSwapLegacyFactoryAddresses),
 		SwapInitialDeposit:            c.config.GetString(optionNameSwapInitialDeposit),
 		SwapEnable:                    c.config.GetBool(optionNameSwapEnable),
 		ChequebookEnable:              c.config.GetBool(optionNameChequebookEnable),
@@ -340,6 +339,7 @@ func buildBeeNode(ctx context.Context, c *command, cmd *cobra.Command, logger lo
 		EnableStorageIncentives:       c.config.GetBool(optionNameStorageIncentivesEnable),
 		StatestoreCacheCapacity:       c.config.GetUint64(optionNameStateStoreCacheCapacity),
 		TargetNeighborhood:            c.config.GetString(optionNameTargetNeighborhood),
+		NeighborhoodSuggester:         c.config.GetString(optionNameNeighborhoodSuggester),
 	})
 
 	return b, err

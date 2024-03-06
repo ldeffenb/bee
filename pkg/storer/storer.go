@@ -284,15 +284,15 @@ func initDiskRepository(
 	locker storage.ChunkLocker,
 	opts *Options,
 	logger log.Logger,
-) (storage.Repository, io.Closer, error) {
+) (storage.Repository, *PinIntegrity, io.Closer, error) {
 	store, err := initStore(basePath, opts)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed creating levelDB index store: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed creating levelDB index store: %w", err)
 	}
 
 	err = migration.Migrate(store, "core-migration", localmigration.BeforeIinitSteps())
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed core migration: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed core migration: %w", err)
 	}
 
 	if opts.LdbStats.Load() != nil {
@@ -344,13 +344,13 @@ func initDiskRepository(
 	if _, err := os.Stat(sharkyBasePath); os.IsNotExist(err) {
 		err := os.Mkdir(sharkyBasePath, 0777)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
 	recoveryCloser, err := sharkyRecovery(ctx, sharkyBasePath, store, opts)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to recover sharky: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to recover sharky: %w", err)
 	}
 
 	sharky, err := sharky.New(
@@ -359,20 +359,24 @@ func initDiskRepository(
 		swarm.SocMaxChunkSize,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed creating sharky instance: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed creating sharky instance: %w", err)
 	}
 
 	txStore := leveldbstore.NewTxStore(store)
 	if err := txStore.Recover(); err != nil {
-		return nil, nil, fmt.Errorf("failed to recover index store: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to recover index store: %w", err)
 	}
 
 	txChunkStore := chunkstore.NewTxChunkStore(txStore, sharky, logger)
 	if err := txChunkStore.Recover(); err != nil {
-		return nil, nil, fmt.Errorf("failed to recover chunk store: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to recover chunk store: %w", err)
 	}
 
-	return storage.NewRepository(txStore, txChunkStore, locker, logger), closer(store, sharky, recoveryCloser), nil
+	pinIntegrity := &PinIntegrity{
+		Store:  store,
+		Sharky: sharky,
+	}
+	return storage.NewRepository(txStore, txChunkStore, locker, logger), pinIntegrity, closer(store, sharky, recoveryCloser), nil
 }
 
 func initCache(ctx context.Context, capacity uint64, repo storage.Repository) (*cache.Cache, error) {
@@ -463,6 +467,8 @@ type DB struct {
 	setSyncerOnce    sync.Once
 	syncer           Syncer
 	opts             workerOpts
+
+	pinIntegrity *PinIntegrity
 }
 
 type workerOpts struct {
@@ -474,9 +480,10 @@ type workerOpts struct {
 // component stores.
 func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 	var (
-		repo     storage.Repository
-		err      error
-		dbCloser io.Closer
+		repo         storage.Repository
+		err          error
+		dbCloser     io.Closer
+		pinIntegrity *PinIntegrity
 	)
 	if opts == nil {
 		opts = defaultOptions()
@@ -505,7 +512,7 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 			return nil, err
 		}
 	} else {
-		repo, dbCloser, err = initDiskRepository(ctx, dirPath, locker, opts, logger)
+		repo, pinIntegrity, dbCloser, err = initDiskRepository(ctx, dirPath, locker, opts, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -556,6 +563,7 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 			wakeupDuration: opts.ReserveWakeUpDuration,
 		},
 		directUploadLimiter: make(chan struct{}, pusher.ConcurrentPushes),
+		pinIntegrity:        pinIntegrity,
 	}
 
 	if db.validStamp == nil {
@@ -669,6 +677,10 @@ func (noopRetrieval) RetrieveChunk(_ context.Context, _ swarm.Address, _ swarm.A
 
 func (db *DB) ChunkStore() storage.ReadOnlyChunkStore {
 	return db.repo.ChunkStore()
+}
+
+func (db *DB) PinIntegrity() *PinIntegrity {
+	return db.pinIntegrity
 }
 
 // Execute implements the internal.TxExecutor interface.

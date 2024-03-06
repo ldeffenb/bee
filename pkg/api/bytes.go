@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/ethersphere/bee/pkg/cac"
+	"github.com/ethersphere/bee/pkg/file/redundancy"
 	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/ethersphere/bee/pkg/postage"
 	storage "github.com/ethersphere/bee/pkg/storage"
@@ -19,7 +20,6 @@ import (
 	"github.com/ethersphere/bee/pkg/tracing"
 	"github.com/gorilla/mux"
 	"github.com/opentracing/opentracing-go/ext"
-	"github.com/opentracing/opentracing-go/log"
 	olog "github.com/opentracing/opentracing-go/log"
 )
 
@@ -33,11 +33,12 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer span.Finish()
 
 	headers := struct {
-		BatchID  []byte `map:"Swarm-Postage-Batch-Id" validate:"required"`
-		SwarmTag uint64 `map:"Swarm-Tag"`
-		Pin      bool   `map:"Swarm-Pin"`
-		Deferred *bool  `map:"Swarm-Deferred-Upload"`
-		Encrypt  bool   `map:"Swarm-Encrypt"`
+		BatchID  []byte           `map:"Swarm-Postage-Batch-Id" validate:"required"`
+		SwarmTag uint64           `map:"Swarm-Tag"`
+		Pin      bool             `map:"Swarm-Pin"`
+		Deferred *bool            `map:"Swarm-Deferred-Upload"`
+		Encrypt  bool             `map:"Swarm-Encrypt"`
+		RLevel   redundancy.Level `map:"Swarm-Redundancy-Level"`
 	}{}
 	if response := s.mapStructure(r.Header, &headers); response != nil {
 		response("invalid header params", logger, w)
@@ -61,7 +62,7 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 			default:
 				jsonhttp.InternalServerError(w, "cannot get or create tag")
 			}
-			ext.LogError(span, err, log.String("action", "tag.create"))
+			ext.LogError(span, err, olog.String("action", "tag.create"))
 			return
 		}
 		span.SetTag("tagID", tag)
@@ -88,7 +89,7 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 		default:
 			jsonhttp.BadRequest(w, nil)
 		}
-		ext.LogError(span, err, log.String("action", "new.StamperPutter"))
+		ext.LogError(span, err, olog.String("action", "new.StamperPutter"))
 		return
 	}
 
@@ -98,7 +99,7 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 		logger:         logger,
 	}
 
-	p := requestPipelineFn(putter, headers.Encrypt)
+	p := requestPipelineFn(putter, headers.Encrypt, headers.RLevel)
 	address, err := p(ctx, r.Body)
 	if err != nil {
 		logger.Debug("split write all failed", "error", err)
@@ -109,7 +110,7 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 		default:
 			jsonhttp.InternalServerError(ow, "split write all failed")
 		}
-		ext.LogError(span, err, log.String("action", "split.WriteAll"))
+		ext.LogError(span, err, olog.String("action", "split.WriteAll"))
 		return
 	}
 
@@ -120,7 +121,7 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("done split failed", "error", err)
 		logger.Error(nil, "done split failed")
 		jsonhttp.InternalServerError(ow, "done split failed")
-		ext.LogError(span, err, log.String("action", "putter.Done"))
+		ext.LogError(span, err, olog.String("action", "putter.Done"))
 		return
 	}
 
@@ -152,7 +153,7 @@ func (s *Service) bytesGetHandler(w http.ResponseWriter, r *http.Request) {
 		ContentTypeHeader: {"application/octet-stream"},
 	}
 
-	s.downloadHandler(logger, w, r, paths.Address, additionalHeaders, true)
+	s.downloadHandler(logger, w, r, paths.Address, additionalHeaders, true, false)
 }
 
 func (s *Service) bytesHeadHandler(w http.ResponseWriter, r *http.Request) {
