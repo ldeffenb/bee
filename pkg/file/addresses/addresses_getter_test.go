@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/file"
-	"github.com/ethersphere/bee/pkg/file/addresses"
-	"github.com/ethersphere/bee/pkg/file/joiner"
-	filetest "github.com/ethersphere/bee/pkg/file/testing"
-	"github.com/ethersphere/bee/pkg/storage/inmemchunkstore"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/file"
+	"github.com/ethersphere/bee/v2/pkg/file/addresses"
+	"github.com/ethersphere/bee/v2/pkg/file/joiner"
+	filetest "github.com/ethersphere/bee/v2/pkg/file/testing"
+	"github.com/ethersphere/bee/v2/pkg/storage/inmemchunkstore"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 func TestAddressesGetterIterateChunkAddresses(t *testing.T) {
@@ -63,7 +63,7 @@ func TestAddressesGetterIterateChunkAddresses(t *testing.T) {
 
 	addressesGetter := addresses.NewGetter(store, addressIterFunc)
 
-	j, _, err := joiner.New(ctx, addressesGetter, rootChunk.Address())
+	j, _, err := joiner.New(ctx, addressesGetter, store, rootChunk.Address())
 	if err != nil {
 		t.Fatal(err)
 	}

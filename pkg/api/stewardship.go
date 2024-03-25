@@ -8,12 +8,12 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ethersphere/bee/pkg/postage"
-	storage "github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/steward"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	"github.com/ethersphere/bee/v2/pkg/steward"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 
-	"github.com/ethersphere/bee/pkg/jsonhttp"
+	"github.com/ethersphere/bee/v2/pkg/jsonhttp"
 	"github.com/gorilla/mux"
 )
 
@@ -71,7 +71,6 @@ func (s *Service) stewardshipPutHandler(w http.ResponseWriter, r *http.Request) 
 
 	err = s.steward.Reupload(r.Context(), paths.Address, stamper)
 	if err != nil {
-		err = errors.Join(err, save())
 		logger.Debug("re-upload failed", "chunk_address", paths.Address, "error", err)
 		logger.Error(nil, "re-upload failed")
 		jsonhttp.InternalServerError(w, "re-upload failed")

@@ -11,12 +11,12 @@ import (
 	"math"
 	"testing"
 
-	storage "github.com/ethersphere/bee/pkg/storage"
-	storagetest "github.com/ethersphere/bee/pkg/storage/storagetest"
-	chunktest "github.com/ethersphere/bee/pkg/storage/testing"
-	"github.com/ethersphere/bee/pkg/storer/internal"
-	pinstore "github.com/ethersphere/bee/pkg/storer/internal/pinning"
-	"github.com/ethersphere/bee/pkg/swarm"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	storagetest "github.com/ethersphere/bee/v2/pkg/storage/storagetest"
+	chunktest "github.com/ethersphere/bee/v2/pkg/storage/testing"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal"
+	pinstore "github.com/ethersphere/bee/v2/pkg/storer/internal/pinning"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 type pinningCollection struct {
@@ -276,6 +276,29 @@ func TestPinStore(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate collection", func(t *testing.T) {
+		root := chunktest.GenerateTestRandomChunk()
+		putter, err := pinstore.NewCollection(st)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = putter.Put(context.Background(), st, st.IndexStore(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = putter.Close(st, st.IndexStore(), root.Address())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = putter.Close(st, st.IndexStore(), root.Address())
+		if err == nil || !errors.Is(err, pinstore.ErrDuplicatePinCollection) {
+			t.Fatalf("unexpected error during CLose, want: %v, got: %v", pinstore.ErrDuplicatePinCollection, err)
+		}
+	})
+
 	t.Run("zero address close", func(t *testing.T) {
 		root := chunktest.GenerateTestRandomChunk()
 		putter, err := pinstore.NewCollection(st)
@@ -292,7 +315,6 @@ func TestPinStore(t *testing.T) {
 		if !errors.Is(err, pinstore.ErrCollectionRootAddressIsZero) {
 			t.Fatalf("unexpected error on close, want: %v, got: %v", pinstore.ErrCollectionRootAddressIsZero, err)
 		}
-
 	})
 }
 

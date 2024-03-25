@@ -14,14 +14,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/encryption"
-	"github.com/ethersphere/bee/pkg/log"
-	storage "github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storage/storageutil"
-	"github.com/ethersphere/bee/pkg/storer/internal"
-	"github.com/ethersphere/bee/pkg/storer/internal/chunkstamp"
-	"github.com/ethersphere/bee/pkg/storer/internal/stampindex"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/encryption"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storage/storageutil"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/chunkstamp"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 // now returns the current time.Time; used in testing.
@@ -240,10 +239,17 @@ type uploadItem struct {
 	TagID    uint64
 	Uploaded int64
 	Synced   int64
+
+	// IdFunc overrides the ID method.
+	// This used to get the ID from the item where the address and batchID were not marshalled.
+	IdFunc func() string
 }
 
 // ID implements the storage.Item interface.
 func (i uploadItem) ID() string {
+	if i.IdFunc != nil {
+		return i.IdFunc()
+	}
 	return storageutil.JoinFields(i.Address.ByteString(), string(i.BatchID))
 }
 
@@ -360,10 +366,6 @@ func (i dirtyTagItem) String() string {
 	return storageutil.JoinFields(i.Namespace(), i.ID())
 }
 
-// stampIndexUploadNamespace represents the
-// namespace name of the stamp index for upload.
-const stampIndexUploadNamespace = "upload"
-
 var (
 	// errPutterAlreadyClosed is returned when trying to Put a new chunk
 	// after the putter has been closed.
@@ -427,28 +429,6 @@ func (u *uploadPutter) Put(ctx context.Context, s internal.Storage, writer stora
 		u.seen++
 		u.split++
 		return nil
-	}
-
-	switch item, loaded, err := stampindex.LoadOrStore(
-		s.IndexStore(),
-		writer,
-		stampIndexUploadNamespace,
-		chunk,
-	); {
-	case err != nil:
-		return fmt.Errorf("load or store stamp index for chunk %v has fail: %w", chunk, err)
-	case loaded && item.ChunkIsImmutable:
-		return errOverwriteOfImmutableBatch
-	case loaded && !item.ChunkIsImmutable:
-		prev := binary.BigEndian.Uint64(item.StampTimestamp)
-		curr := binary.BigEndian.Uint64(chunk.Stamp().Timestamp())
-		if prev > curr {
-			return errOverwriteOfNewerBatch
-		}
-		err = stampindex.Store(writer, stampIndexUploadNamespace, chunk)
-		if err != nil {
-			return fmt.Errorf("failed updating stamp index: %w", err)
-		}
 	}
 
 	u.split++
@@ -735,10 +715,9 @@ func Report(
 		return fmt.Errorf("failed deleting chunk %s: %w", chunk.Address(), err)
 	}
 
-	ui.Synced = now().UnixNano()
-	err = batch.Put(ui)
+	err = batch.Delete(ui)
 	if err != nil {
-		return fmt.Errorf("failed updating uploadItem %s: %w", ui, err)
+		return fmt.Errorf("failed deleting uploadItem %s: %w", ui, err)
 	}
 
 	return batch.Commit()
@@ -889,15 +868,31 @@ func DeleteTag(st storage.Store, tagID uint64) error {
 	return nil
 }
 
-func IterateAll(st storage.Store, iterateFn func(addr swarm.Address, isSynced bool) (bool, error)) error {
+func IterateAll(st storage.Store, iterateFn func(item storage.Item) (bool, error)) error {
 	return st.Iterate(
 		storage.Query{
 			Factory: func() storage.Item { return new(uploadItem) },
 		},
 		func(r storage.Result) (bool, error) {
-			address := swarm.NewAddress([]byte(r.ID[:32]))
-			synced := r.Entry.(*uploadItem).Synced != 0
-			return iterateFn(address, synced)
+			ui := r.Entry.(*uploadItem)
+			ui.IdFunc = func() string {
+				return r.ID
+			}
+			return iterateFn(ui)
+		},
+	)
+}
+
+func IterateAllTagItems(st storage.Store, cb func(ti *TagItem) (bool, error)) error {
+	return st.Iterate(
+		storage.Query{
+			Factory: func() storage.Item {
+				return new(TagItem)
+			},
+		},
+		func(result storage.Result) (bool, error) {
+			ti := result.Entry.(*TagItem)
+			return cb(ti)
 		},
 	)
 }

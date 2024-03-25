@@ -5,8 +5,8 @@
 package api
 
 import (
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 type (
@@ -95,6 +95,7 @@ type (
 	PostageStampBucketsResponse       = postageStampBucketsResponse
 	BucketData                        = bucketData
 	WalletResponse                    = walletResponse
+	WalletTxResponse                  = walletTxResponse
 	GetStakeResponse                  = getStakeResponse
 	WithdrawAllStakeResponse          = withdrawAllStakeResponse
 	StatusSnapshotResponse            = statusSnapshotResponse

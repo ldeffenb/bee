@@ -23,18 +23,18 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/external"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethersphere/bee"
-	chaincfg "github.com/ethersphere/bee/pkg/config"
-	"github.com/ethersphere/bee/pkg/crypto"
-	"github.com/ethersphere/bee/pkg/crypto/clef"
-	"github.com/ethersphere/bee/pkg/keystore"
-	filekeystore "github.com/ethersphere/bee/pkg/keystore/file"
-	memkeystore "github.com/ethersphere/bee/pkg/keystore/mem"
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/node"
-	"github.com/ethersphere/bee/pkg/resolver/multiresolver"
-	"github.com/ethersphere/bee/pkg/spinlock"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2"
+	chaincfg "github.com/ethersphere/bee/v2/pkg/config"
+	"github.com/ethersphere/bee/v2/pkg/crypto"
+	"github.com/ethersphere/bee/v2/pkg/crypto/clef"
+	"github.com/ethersphere/bee/v2/pkg/keystore"
+	filekeystore "github.com/ethersphere/bee/v2/pkg/keystore/file"
+	memkeystore "github.com/ethersphere/bee/v2/pkg/keystore/mem"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/node"
+	"github.com/ethersphere/bee/v2/pkg/resolver/multiresolver"
+	"github.com/ethersphere/bee/v2/pkg/spinlock"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
@@ -287,6 +287,11 @@ func buildBeeNode(ctx context.Context, c *command, cmd *cobra.Command, logger lo
 		blockchainRpcEndpoint = swapEndpoint
 	}
 
+	var neighborhoodSuggester string
+	if networkID == chaincfg.Mainnet.NetworkID {
+		neighborhoodSuggester = c.config.GetString(optionNameNeighborhoodSuggester)
+	}
+
 	b, err := node.NewBee(ctx, c.config.GetString(optionNameP2PAddr), signerConfig.publicKey, signerConfig.signer, networkID, logger, signerConfig.libp2pPrivateKey, signerConfig.pssPrivateKey, &node.Options{
 		DataDir:                       c.config.GetString(optionNameDataDir),
 		CacheCapacity:                 c.config.GetUint64(optionNameCacheCapacity),
@@ -313,7 +318,6 @@ func buildBeeNode(ctx context.Context, c *command, cmd *cobra.Command, logger lo
 		BootnodeMode:                  bootNode,
 		BlockchainRpcEndpoint:         blockchainRpcEndpoint,
 		SwapFactoryAddress:            c.config.GetString(optionNameSwapFactoryAddress),
-		SwapLegacyFactoryAddresses:    c.config.GetStringSlice(optionNameSwapLegacyFactoryAddresses),
 		SwapInitialDeposit:            c.config.GetString(optionNameSwapInitialDeposit),
 		SwapEnable:                    c.config.GetBool(optionNameSwapEnable),
 		ChequebookEnable:              c.config.GetBool(optionNameChequebookEnable),
@@ -340,6 +344,8 @@ func buildBeeNode(ctx context.Context, c *command, cmd *cobra.Command, logger lo
 		EnableStorageIncentives:       c.config.GetBool(optionNameStorageIncentivesEnable),
 		StatestoreCacheCapacity:       c.config.GetUint64(optionNameStateStoreCacheCapacity),
 		TargetNeighborhood:            c.config.GetString(optionNameTargetNeighborhood),
+		NeighborhoodSuggester:         neighborhoodSuggester,
+		WhitelistedWithdrawalAddress:  c.config.GetStringSlice(optionNameWhitelistedWithdrawalAddress),
 	})
 
 	return b, err

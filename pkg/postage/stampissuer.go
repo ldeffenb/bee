@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/log"
-	storage "github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -154,8 +154,8 @@ func (s stampIssuerData) Clone() stampIssuerData {
 // embedded in multiple Stampers, can be used concurrently.
 type StampIssuer struct {
 	logger    log.Logger
-	data      stampIssuerData
-	bucketMtx sync.Mutex
+	data stampIssuerData
+	mtx  sync.Mutex
 }
 
 // NewStampIssuer constructs a StampIssuer as an extension of a batch for local
@@ -183,10 +183,8 @@ func NewStampIssuer(label, keyID string, batchID []byte, batchAmount *big.Int, b
 
 // increment increments the count in the correct collision
 // bucket for a newly stamped chunk with given addr address.
+// Must be mutex locked before usage.
 func (si *StampIssuer) increment(addr swarm.Address) (batchIndex []byte, batchTimestamp []byte, err error) {
-	si.bucketMtx.Lock()
-	defer si.bucketMtx.Unlock()
-
 	bIdx := toBucket(si.BucketDepth(), addr)
 	bCnt := si.data.Buckets[bIdx]
 
@@ -208,14 +206,6 @@ func (si *StampIssuer) increment(addr swarm.Address) (batchIndex []byte, batchTi
 	si.logger.Debug("StampIssuer.increment", "chunk", addr, "batch", hex.EncodeToString(si.data.BatchID), "bucket", bIdx, "bCnt", si.data.Buckets[bIdx], "maxused", si.data.MaxBucketCount, "upperbound", si.BucketUpperBound())
 
 	return indexToBytes(bIdx, bCnt), unixTime(), nil
-}
-
-// check if this stamp index has already been assigned
-func (si *StampIssuer) assigned(stampIdx []byte) bool {
-	si.bucketMtx.Lock()
-	defer si.bucketMtx.Unlock()
-	b, idx := BucketIndexFromBytes(stampIdx)
-	return idx < si.data.Buckets[b]
 }
 
 // Label returns the label of the issuer.
@@ -280,8 +270,8 @@ func (si *StampIssuer) ImmutableFlag() bool {
 }
 
 func (si *StampIssuer) Buckets() []uint32 {
-	si.bucketMtx.Lock()
-	defer si.bucketMtx.Unlock()
+	si.mtx.Lock()
+	defer si.mtx.Unlock()
 	b := make([]uint32, len(si.data.Buckets))
 	copy(b, si.data.Buckets)
 	return b

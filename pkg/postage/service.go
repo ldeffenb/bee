@@ -14,8 +14,8 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/storage"
 )
 
 // loggerName is the tree path name of the logger for this package.
@@ -178,8 +178,8 @@ func (ps *service) GetStampIssuer(batchID []byte) (*StampIssuer, func() error, e
 
 // save persists the specified stamp issuer to the stamperstore.
 func (ps *service) save(st *StampIssuer) error {
-	st.bucketMtx.Lock()
-	defer st.bucketMtx.Unlock()
+	st.mtx.Lock()
+	defer st.mtx.Unlock()
 
 	if err := ps.store.Put(&StampIssuerItem{
 		Issuer: st,

@@ -11,19 +11,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/postage"
-	batchstore "github.com/ethersphere/bee/pkg/postage/batchstore/mock"
-	"github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storage/inmemchunkstore"
-	"github.com/ethersphere/bee/pkg/storage/migration"
-	"github.com/ethersphere/bee/pkg/storer"
-	pinstore "github.com/ethersphere/bee/pkg/storer/internal/pinning"
-	"github.com/ethersphere/bee/pkg/storer/internal/upload"
-	localmigration "github.com/ethersphere/bee/pkg/storer/migration"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/topology"
-	kademlia "github.com/ethersphere/bee/pkg/topology/mock"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	batchstore "github.com/ethersphere/bee/v2/pkg/postage/batchstore/mock"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storage/inmemchunkstore"
+	"github.com/ethersphere/bee/v2/pkg/storage/migration"
+	"github.com/ethersphere/bee/v2/pkg/storer"
+	cs "github.com/ethersphere/bee/v2/pkg/storer/internal/chunkstore"
+	pinstore "github.com/ethersphere/bee/v2/pkg/storer/internal/pinning"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/upload"
+	localmigration "github.com/ethersphere/bee/v2/pkg/storer/migration"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/topology"
+	kademlia "github.com/ethersphere/bee/v2/pkg/topology/mock"
 )
 
 func verifyChunks(
@@ -44,7 +45,26 @@ func verifyChunks(
 			t.Fatalf("unexpected chunk has state: want %t have %t", has, hasFound)
 		}
 	}
+}
 
+func verifyChunkRefCount(
+	t *testing.T,
+	repo storage.Repository,
+	chunks []swarm.Chunk,
+) {
+	t.Helper()
+
+	for _, ch := range chunks {
+		_ = repo.IndexStore().Iterate(storage.Query{
+			Factory: func() storage.Item { return new(cs.RetrievalIndexItem) },
+		}, func(r storage.Result) (bool, error) {
+			entry := r.Entry.(*cs.RetrievalIndexItem)
+			if entry.Address.Equal(ch.Address()) && entry.RefCnt != 1 {
+				t.Errorf("chunk %s has refCnt=%d", ch.Address(), entry.RefCnt)
+			}
+			return false, nil
+		})
+	}
 }
 
 func verifySessionInfo(

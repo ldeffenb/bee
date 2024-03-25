@@ -10,9 +10,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/sharky"
-	"github.com/ethersphere/bee/pkg/storer/internal/chunkstore"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/sharky"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/chunkstore"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 // FixSharky removes all invalid RetrievalIndexItems which are not properly read from sharky.

@@ -14,12 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/postage"
-	"github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storage/storageutil"
-	"github.com/ethersphere/bee/pkg/storer/internal"
-	"github.com/ethersphere/bee/pkg/storer/internal/reserve"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storage/storageutil"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/reserve"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 const (
@@ -28,8 +28,6 @@ const (
 	reserveUpdateLockKey = "reserveUpdateLockKey"
 	batchExpiry          = "batchExpiry"
 	batchExpiryDone      = "batchExpiryDone"
-
-	reserveSizeWithinRadiusWakeup = time.Hour
 )
 
 func reserveUpdateBatchLockKey(batchID []byte) string {
@@ -37,6 +35,7 @@ func reserveUpdateBatchLockKey(batchID []byte) string {
 }
 
 var errMaxRadius = errors.New("max radius reached")
+var reserveSizeWithinRadius atomic.Uint64
 
 type Syncer interface {
 	// Number of active historical syncing jobs.
@@ -76,50 +75,19 @@ func (db *DB) startReserveWorkers(
 
 	if err := db.reserve.SetRadius(db.repo.IndexStore(), r); err != nil {
 		db.logger.Error(err, "reserve set radius")
+	} else {
+		db.metrics.StorageRadius.Set(float64(r))
 	}
-
-	db.metrics.StorageRadius.Set(float64(db.reserve.Size()))
 
 	// syncing can now begin now that the reserver worker is running
 	db.syncer.Start(ctx)
-
-	db.inFlight.Add(1)
-	go db.radiusWorker(ctx, wakeUpDur)
 
 	db.inFlight.Add(2)
 	go db.reserveSizeWithinRadiusWorker(ctx)
 }
 
-func (db *DB) radiusWorker(ctx context.Context, wakeUpDur time.Duration) {
-	defer db.inFlight.Done()
-
-	radiusWakeUpTicker := time.NewTicker(wakeUpDur)
-	defer radiusWakeUpTicker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-radiusWakeUpTicker.C:
-			radius := db.reserve.Radius()
-			if db.reserve.Size() < threshold(db.reserve.Capacity()) && db.syncer.SyncRate() == 0 && radius > 0 {
-				radius--
-				err := db.reserve.SetRadius(db.repo.IndexStore(), radius)
-				if err != nil {
-					db.logger.Error(err, "reserve set radius")
-				}
-				db.logger.Info("reserve radius decrease", "radius", radius)
-			}
-			db.metrics.StorageRadius.Set(float64(radius))
-		}
-	}
-}
-
 func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 	defer db.inFlight.Done()
-
-	ticker := time.NewTicker(reserveSizeWithinRadiusWakeup)
-	defer ticker.Stop()
 
 	var activeEviction atomic.Bool
 	go func() {
@@ -143,8 +111,7 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 		}
 	}()
 
-	for {
-
+	countFn := func() int {
 		skipInvalidCheck := activeEviction.Load()
 
 		count := 0
@@ -171,6 +138,7 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 		if err != nil {
 			db.logger.Error(err, "reserve count within radius")
 		}
+		reserveSizeWithinRadius.Store(uint64(count))
 
 		for batch := range evictBatches {
 			db.logger.Debug("reserve size worker, invalid batch id", "batch_id", hex.EncodeToString([]byte(batch)))
@@ -184,11 +152,35 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 			db.metrics.ReserveMissingBatch.Set(float64(missing))
 		}
 
+		return count
+	}
+
+	// initial run for the metrics
+	_ = countFn()
+
+	ticker := time.NewTicker(db.opts.wakeupDuration)
+	defer ticker.Stop()
+
+	for {
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+
+		count := countFn()
+		radius := db.StorageRadius()
+
+		if count < threshold(db.reserve.Capacity()) && db.syncer.SyncRate() == 0 && radius > 0 {
+			radius--
+			err := db.reserve.SetRadius(db.repo.IndexStore(), radius)
+			if err != nil {
+				db.logger.Error(err, "reserve set radius")
+			}
+			db.logger.Info("reserve radius decrease", "radius", radius)
+		}
+		db.metrics.StorageRadius.Set(float64(radius))
 	}
 }
 
@@ -217,6 +209,7 @@ func (db *DB) evictionWorker(ctx context.Context) {
 			}
 
 		case <-overCapTrigger:
+			db.metrics.OverCapTriggerCount.Inc()
 			err := db.unreserve(ctx)
 			if err != nil {
 				db.logger.Error(err, "eviction worker unreserve")
@@ -495,6 +488,10 @@ func (db *DB) ReserveSize() int {
 		return 0
 	}
 	return db.reserve.Size()
+}
+
+func (db *DB) ReserveSizeWithinRadius() uint64 {
+	return reserveSizeWithinRadius.Load()
 }
 
 func (db *DB) IsWithinStorageRadius(addr swarm.Address) bool {

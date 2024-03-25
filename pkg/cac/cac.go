@@ -10,8 +10,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/ethersphere/bee/pkg/bmtpool"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/bmtpool"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 var (

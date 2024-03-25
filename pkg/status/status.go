@@ -8,13 +8,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/p2p"
-	"github.com/ethersphere/bee/pkg/p2p/protobuf"
-	"github.com/ethersphere/bee/pkg/postage"
-	"github.com/ethersphere/bee/pkg/status/internal/pb"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/topology"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/p2p"
+	"github.com/ethersphere/bee/v2/pkg/p2p/protobuf"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	"github.com/ethersphere/bee/v2/pkg/status/internal/pb"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/topology"
 )
 
 // loggerName is the tree path name of the logger for this package.
@@ -37,6 +37,7 @@ type SyncReporter interface {
 // Reserve defines the reserve storage related information required.
 type Reserve interface {
 	ReserveSize() int
+	ReserveSizeWithinRadius() uint64
 	StorageRadius() uint8
 }
 
@@ -79,16 +80,18 @@ func NewService(
 // LocalSnapshot returns the current status snapshot of this node.
 func (s *Service) LocalSnapshot() (*Snapshot, error) {
 	var (
-		storageRadius    uint8
-		syncRate         float64
-		reserveSize      uint64
-		connectedPeers   uint64
-		neighborhoodSize uint64
+		storageRadius           uint8
+		syncRate                float64
+		reserveSize             uint64
+		reserveSizeWithinRadius uint64
+		connectedPeers          uint64
+		neighborhoodSize        uint64
 	)
 
 	if s.reserve != nil {
 		storageRadius = s.reserve.StorageRadius()
 		reserveSize = uint64(s.reserve.ReserveSize())
+		reserveSizeWithinRadius = s.reserve.ReserveSizeWithinRadius()
 	}
 
 	if s.sync != nil {
@@ -115,14 +118,15 @@ func (s *Service) LocalSnapshot() (*Snapshot, error) {
 	}
 
 	return &Snapshot{
-		BeeMode:          s.beeMode,
-		ReserveSize:      reserveSize,
-		PullsyncRate:     syncRate,
-		StorageRadius:    uint32(storageRadius),
-		ConnectedPeers:   connectedPeers,
-		NeighborhoodSize: neighborhoodSize,
-		BatchCommitment:  commitment,
-		IsReachable:      s.topologyDriver.IsReachable(),
+		BeeMode:                 s.beeMode,
+		ReserveSize:             reserveSize,
+		ReserveSizeWithinRadius: reserveSizeWithinRadius,
+		PullsyncRate:            syncRate,
+		StorageRadius:           uint32(storageRadius),
+		ConnectedPeers:          connectedPeers,
+		NeighborhoodSize:        neighborhoodSize,
+		BatchCommitment:         commitment,
+		IsReachable:             s.topologyDriver.IsReachable(),
 	}, nil
 }
 

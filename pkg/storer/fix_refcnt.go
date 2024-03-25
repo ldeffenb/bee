@@ -12,12 +12,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/storer/internal/cache"
-	"github.com/ethersphere/bee/pkg/storer/internal/chunkstore"
-	pinstore "github.com/ethersphere/bee/pkg/storer/internal/pinning"
-	"github.com/ethersphere/bee/pkg/storer/internal/reserve"
-	"github.com/ethersphere/bee/pkg/storer/internal/upload"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/cache"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/chunkstore"
+	pinstore "github.com/ethersphere/bee/v2/pkg/storer/internal/pinning"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/reserve"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/upload"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 // FixRefCnt attempts to correct the RefCnt in all RetrievalIndexItems by scanning the actual chunk referers.

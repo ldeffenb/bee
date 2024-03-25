@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ethersphere/bee/pkg/api"
-	"github.com/ethersphere/bee/pkg/jsonhttp/jsonhttptest"
+	"github.com/ethersphere/bee/v2/pkg/api"
+	"github.com/ethersphere/bee/v2/pkg/jsonhttp/jsonhttptest"
 )
 
 func TestCORSHeaders(t *testing.T) {
@@ -137,7 +137,7 @@ func TestCors(t *testing.T) {
 			expectedMethods: "POST",
 		}, {
 			endpoint:        "bzz/0101011",
-			expectedMethods: "GET",
+			expectedMethods: "GET, HEAD",
 		},
 		{
 			endpoint:        "chunks",

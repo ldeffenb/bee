@@ -7,8 +7,8 @@ package storeadapter
 import (
 	"strings"
 
-	"github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storage/migration"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storage/migration"
 )
 
 func allSteps() migration.Steps {
@@ -19,6 +19,7 @@ func allSteps() migration.Steps {
 		4: deletePrefix("blocklist"),
 		5: deletePrefix("batchstore"),
 		6: deletePrefix("sync_interval"),
+		7: deletePrefix("sync_interval"),
 	}
 }
 

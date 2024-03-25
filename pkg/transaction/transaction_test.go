@@ -18,16 +18,16 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethersphere/bee/pkg/crypto"
-	signermock "github.com/ethersphere/bee/pkg/crypto/mock"
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/sctx"
-	storemock "github.com/ethersphere/bee/pkg/statestore/mock"
-	"github.com/ethersphere/bee/pkg/transaction"
-	"github.com/ethersphere/bee/pkg/transaction/backendmock"
-	"github.com/ethersphere/bee/pkg/transaction/monitormock"
-	"github.com/ethersphere/bee/pkg/util/abiutil"
-	"github.com/ethersphere/bee/pkg/util/testutil"
+	"github.com/ethersphere/bee/v2/pkg/crypto"
+	signermock "github.com/ethersphere/bee/v2/pkg/crypto/mock"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/sctx"
+	storemock "github.com/ethersphere/bee/v2/pkg/statestore/mock"
+	"github.com/ethersphere/bee/v2/pkg/transaction"
+	"github.com/ethersphere/bee/v2/pkg/transaction/backendmock"
+	"github.com/ethersphere/bee/v2/pkg/transaction/monitormock"
+	"github.com/ethersphere/bee/v2/pkg/util/abiutil"
+	"github.com/ethersphere/bee/v2/pkg/util/testutil"
 )
 
 func nonceKey(sender common.Address) string {
@@ -935,12 +935,12 @@ func TestTransactionService_UnwrapABIError(t *testing.T) {
 		txData    = common.Hex2Bytes("0xabcdee")
 		value     = big.NewInt(1)
 
-		// This is the ABI of the following contract: https://goerli.etherscan.io/address/0xd29d9e385f19d888557cd609006bb1934cb5d1e2#code
+		// This is the ABI of the following contract: https://sepolia.etherscan.io/address/0xd29d9e385f19d888557cd609006bb1934cb5d1e2#code
 		contractABI = abiutil.MustParseABI(`[{"inputs":[{"internalType":"uint256","name":"available","type":"uint256"},{"internalType":"uint256","name":"required","type":"uint256"}],"name":"InsufficientBalance","type":"error"},{"inputs":[{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"transfer","outputs":[],"stateMutability":"nonpayable","type":"function"}]`)
 		rpcAPIErr   = &rpcAPIError{
 			code: 3,
 			msg:  "execution reverted",
-			err:  "0xcf4791810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006f", // This is the ABI encoded error form the following failed transaction: https://goerli.etherscan.io/tx/0x74a2577db1c325c41e38977aa1eb32ab03dfa17cc1fa0649e84f3d8c0f0882ee
+			err:  "0xcf4791810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006f", // This is the ABI encoded error form the following failed transaction: https://sepolia.etherscan.io/tx/0x74a2577db1c325c41e38977aa1eb32ab03dfa17cc1fa0649e84f3d8c0f0882ee
 		}
 	)
 

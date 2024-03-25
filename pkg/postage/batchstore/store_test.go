@@ -10,16 +10,16 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/postage"
-	"github.com/ethersphere/bee/pkg/postage/batchstore"
-	mockpost "github.com/ethersphere/bee/pkg/postage/mock"
-	postagetest "github.com/ethersphere/bee/pkg/postage/testing"
-	"github.com/ethersphere/bee/pkg/statestore/leveldb"
-	"github.com/ethersphere/bee/pkg/statestore/mock"
-	"github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/util/testutil"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	"github.com/ethersphere/bee/v2/pkg/postage/batchstore"
+	mockpost "github.com/ethersphere/bee/v2/pkg/postage/mock"
+	postagetest "github.com/ethersphere/bee/v2/pkg/postage/testing"
+	"github.com/ethersphere/bee/v2/pkg/statestore/leveldb"
+	"github.com/ethersphere/bee/v2/pkg/statestore/mock"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/util/testutil"
 )
 
 var noopEvictFn = func([]byte) error { return nil }
@@ -222,7 +222,7 @@ func TestBatchStore_Reset(t *testing.T) {
 
 	// we expect one key in the statestore since the schema name
 	// will always be there.
-	if c != 1 {
+	if c != 0 {
 		t.Fatalf("expected only one key in statestore, got %d", c)
 	}
 }
@@ -328,7 +328,7 @@ func TestBatchUpdate(t *testing.T) {
 	// state after the batch is saved/updated. Unlike depth updates, value updates
 	// that are above cumulative amount should NOT result in any radius changes.
 	// Value updates that are less than or equal to the cumulative amount trigger
-	// the eviction for the the batch, as such, radius may be altered.
+	// the eviction for the batch, as such, radius may be altered.
 
 	tcs := []testCase{
 		{

@@ -12,13 +12,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ethersphere/bee/pkg/postage"
-	"github.com/ethersphere/bee/pkg/retrieval"
-	"github.com/ethersphere/bee/pkg/storage"
-	storer "github.com/ethersphere/bee/pkg/storer"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/topology"
-	"github.com/ethersphere/bee/pkg/traversal"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	"github.com/ethersphere/bee/v2/pkg/retrieval"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	storer "github.com/ethersphere/bee/v2/pkg/storer"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/topology"
+	"github.com/ethersphere/bee/v2/pkg/traversal"
 )
 
 type Interface interface {
@@ -45,11 +45,11 @@ type steward struct {
 	netTraverser traversal.Traverser
 }
 
-func New(ns storer.NetStore, r retrieval.Interface) Interface {
+func New(ns storer.NetStore, r retrieval.Interface, joinerPutter storage.Putter) Interface {
 	return &steward{
 		netStore:     ns,
-		traverser:    traversal.New(ns.Download(true)),
-		netTraverser: traversal.New(&netGetter{r}),
+		traverser:    traversal.New(ns.Download(true), joinerPutter),
+		netTraverser: traversal.New(&netGetter{r}, joinerPutter),
 	}
 }
 

@@ -14,13 +14,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storer/internal"
-	"github.com/ethersphere/bee/pkg/storer/internal/chunkstamp"
-	"github.com/ethersphere/bee/pkg/storer/internal/stampindex"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/topology"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/chunkstamp"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/stampindex"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/topology"
 )
 
 // loggerName is the tree path name of the logger for this package.
@@ -123,24 +123,11 @@ func (r *Reserve) Put(ctx context.Context, store internal.Storage, chunk swarm.C
 
 	newStampIndex := true
 
-	switch item, loaded, err := stampindex.LoadOrStore(
-		indexStore,
-		storeBatch,
-		reserveNamespace,
-		chunk,
-	); {
-	case err != nil:
+	item, loaded, err := stampindex.LoadOrStore(indexStore, storeBatch, reserveNamespace, chunk)
+	if err != nil {
 		return false, fmt.Errorf("load or store stamp index for chunk %v has fail: %w", chunk, err)
-	case loaded && item.ChunkIsImmutable:
-		r.logger.Debug(
-			"NOT overwriting immutable batch index",
-			"old_chunk", item.ChunkAddress,
-			"new_chunk", chunk.Address(),
-			"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
-			"index", hex.EncodeToString(chunk.Stamp().Index()),
-		)
-		return false, fmt.Errorf("batch %s index %s: %w", hex.EncodeToString(chunk.Stamp().BatchID()), hex.EncodeToString(chunk.Stamp().Index()), storage.ErrOverwriteOfImmutableBatch)
-	case loaded && !item.ChunkIsImmutable:
+	}
+	if loaded {
 		prev := binary.BigEndian.Uint64(item.StampTimestamp)
 		curr := binary.BigEndian.Uint64(chunk.Stamp().Timestamp())
 		if prev >= curr {

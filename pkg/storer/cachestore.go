@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"time"
 
-	storage "github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storer/internal"
-	"github.com/ethersphere/bee/pkg/swarm"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 const (
@@ -42,7 +42,7 @@ func (db *DB) cacheWorker(ctx context.Context) {
 				continue
 			}
 
-			evict := min(1_000, (size - capc))
+			evict := min(10_000, (size - capc))
 
 			dur := captureDuration(time.Now())
 			err := db.Execute(ctx, func(s internal.Storage) error {

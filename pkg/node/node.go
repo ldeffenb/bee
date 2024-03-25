@@ -24,55 +24,55 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethersphere/bee/pkg/accounting"
-	"github.com/ethersphere/bee/pkg/addressbook"
-	"github.com/ethersphere/bee/pkg/api"
-	"github.com/ethersphere/bee/pkg/auth"
-	"github.com/ethersphere/bee/pkg/config"
-	"github.com/ethersphere/bee/pkg/crypto"
-	"github.com/ethersphere/bee/pkg/feeds/factory"
-	"github.com/ethersphere/bee/pkg/hive"
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/metrics"
-	"github.com/ethersphere/bee/pkg/p2p"
-	"github.com/ethersphere/bee/pkg/p2p/libp2p"
-	"github.com/ethersphere/bee/pkg/pingpong"
-	"github.com/ethersphere/bee/pkg/postage"
-	"github.com/ethersphere/bee/pkg/postage/batchservice"
-	"github.com/ethersphere/bee/pkg/postage/batchstore"
-	"github.com/ethersphere/bee/pkg/postage/listener"
-	"github.com/ethersphere/bee/pkg/postage/postagecontract"
-	"github.com/ethersphere/bee/pkg/pricer"
-	"github.com/ethersphere/bee/pkg/pricing"
-	"github.com/ethersphere/bee/pkg/pss"
-	"github.com/ethersphere/bee/pkg/puller"
-	"github.com/ethersphere/bee/pkg/pullsync"
-	"github.com/ethersphere/bee/pkg/pusher"
-	"github.com/ethersphere/bee/pkg/pushsync"
-	"github.com/ethersphere/bee/pkg/resolver/multiresolver"
-	"github.com/ethersphere/bee/pkg/retrieval"
-	"github.com/ethersphere/bee/pkg/salud"
-	"github.com/ethersphere/bee/pkg/settlement/pseudosettle"
-	"github.com/ethersphere/bee/pkg/settlement/swap"
-	"github.com/ethersphere/bee/pkg/settlement/swap/chequebook"
-	"github.com/ethersphere/bee/pkg/settlement/swap/erc20"
-	"github.com/ethersphere/bee/pkg/settlement/swap/priceoracle"
-	"github.com/ethersphere/bee/pkg/status"
-	"github.com/ethersphere/bee/pkg/steward"
-	"github.com/ethersphere/bee/pkg/storageincentives"
-	"github.com/ethersphere/bee/pkg/storageincentives/redistribution"
-	"github.com/ethersphere/bee/pkg/storageincentives/staking"
-	storer "github.com/ethersphere/bee/pkg/storer"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/topology"
-	"github.com/ethersphere/bee/pkg/topology/kademlia"
-	"github.com/ethersphere/bee/pkg/topology/lightnode"
-	"github.com/ethersphere/bee/pkg/tracing"
-	"github.com/ethersphere/bee/pkg/transaction"
-	"github.com/ethersphere/bee/pkg/util/abiutil"
-	"github.com/ethersphere/bee/pkg/util/ioutil"
-	"github.com/ethersphere/bee/pkg/util/nbhdutil"
-	"github.com/ethersphere/bee/pkg/util/syncutil"
+	"github.com/ethersphere/bee/v2/pkg/accounting"
+	"github.com/ethersphere/bee/v2/pkg/addressbook"
+	"github.com/ethersphere/bee/v2/pkg/api"
+	"github.com/ethersphere/bee/v2/pkg/auth"
+	"github.com/ethersphere/bee/v2/pkg/config"
+	"github.com/ethersphere/bee/v2/pkg/crypto"
+	"github.com/ethersphere/bee/v2/pkg/feeds/factory"
+	"github.com/ethersphere/bee/v2/pkg/hive"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/metrics"
+	"github.com/ethersphere/bee/v2/pkg/p2p"
+	"github.com/ethersphere/bee/v2/pkg/p2p/libp2p"
+	"github.com/ethersphere/bee/v2/pkg/pingpong"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	"github.com/ethersphere/bee/v2/pkg/postage/batchservice"
+	"github.com/ethersphere/bee/v2/pkg/postage/batchstore"
+	"github.com/ethersphere/bee/v2/pkg/postage/listener"
+	"github.com/ethersphere/bee/v2/pkg/postage/postagecontract"
+	"github.com/ethersphere/bee/v2/pkg/pricer"
+	"github.com/ethersphere/bee/v2/pkg/pricing"
+	"github.com/ethersphere/bee/v2/pkg/pss"
+	"github.com/ethersphere/bee/v2/pkg/puller"
+	"github.com/ethersphere/bee/v2/pkg/pullsync"
+	"github.com/ethersphere/bee/v2/pkg/pusher"
+	"github.com/ethersphere/bee/v2/pkg/pushsync"
+	"github.com/ethersphere/bee/v2/pkg/resolver/multiresolver"
+	"github.com/ethersphere/bee/v2/pkg/retrieval"
+	"github.com/ethersphere/bee/v2/pkg/salud"
+	"github.com/ethersphere/bee/v2/pkg/settlement/pseudosettle"
+	"github.com/ethersphere/bee/v2/pkg/settlement/swap"
+	"github.com/ethersphere/bee/v2/pkg/settlement/swap/chequebook"
+	"github.com/ethersphere/bee/v2/pkg/settlement/swap/erc20"
+	"github.com/ethersphere/bee/v2/pkg/settlement/swap/priceoracle"
+	"github.com/ethersphere/bee/v2/pkg/status"
+	"github.com/ethersphere/bee/v2/pkg/steward"
+	"github.com/ethersphere/bee/v2/pkg/storageincentives"
+	"github.com/ethersphere/bee/v2/pkg/storageincentives/redistribution"
+	"github.com/ethersphere/bee/v2/pkg/storageincentives/staking"
+	storer "github.com/ethersphere/bee/v2/pkg/storer"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/topology"
+	"github.com/ethersphere/bee/v2/pkg/topology/kademlia"
+	"github.com/ethersphere/bee/v2/pkg/topology/lightnode"
+	"github.com/ethersphere/bee/v2/pkg/tracing"
+	"github.com/ethersphere/bee/v2/pkg/transaction"
+	"github.com/ethersphere/bee/v2/pkg/util/abiutil"
+	"github.com/ethersphere/bee/v2/pkg/util/ioutil"
+	"github.com/ethersphere/bee/v2/pkg/util/nbhdutil"
+	"github.com/ethersphere/bee/v2/pkg/util/syncutil"
 	"github.com/hashicorp/go-multierror"
 	ma "github.com/multiformats/go-multiaddr"
 	promc "github.com/prometheus/client_golang/prometheus"
@@ -146,7 +146,6 @@ type Options struct {
 	BootnodeMode                  bool
 	BlockchainRpcEndpoint         string
 	SwapFactoryAddress            string
-	SwapLegacyFactoryAddresses    []string
 	SwapInitialDeposit            string
 	SwapEnable                    bool
 	ChequebookEnable              bool
@@ -172,6 +171,8 @@ type Options struct {
 	EnableStorageIncentives       bool
 	StatestoreCacheCapacity       uint64
 	TargetNeighborhood            string
+	NeighborhoodSuggester         string
+	WhitelistedWithdrawalAddress  []string
 }
 
 const (
@@ -185,7 +186,7 @@ const (
 	maxPaymentThreshold           = 24 * refreshRate          // maximal accepted payment threshold of full nodes
 	mainnetNetworkID              = uint64(1)                 //
 	ReserveCapacity               = 4_194_304                 // 2^22 chunks
-	reserveWakeUpDuration         = 15 * time.Minute          // time to wait before waking up reserveWorker
+	reserveWakeUpDuration         = 30 * time.Minute          // time to wait before waking up reserveWorker
 	reserveTreshold               = ReserveCapacity * 5 / 10
 	reserveMinimumRadius          = 0
 )
@@ -253,7 +254,7 @@ func NewBee(
 	}
 	b.stateStoreCloser = stateStore
 
-	// Check if the the batchstore exists. If not, we can assume it's missing
+	// Check if the batchstore exists. If not, we can assume it's missing
 	// due to a migration or it's a fresh install.
 	batchStoreExists, err := batchStoreExists(stateStore)
 	if err != nil {
@@ -283,9 +284,18 @@ func NewBee(
 
 	if !nonceExists {
 		// mine the overlay
-		if o.TargetNeighborhood != "" {
-			logger.Info("mining an overlay address for the fresh node to target the selected neighborhood", "target", o.TargetNeighborhood)
-			swarmAddress, nonce, err = nbhdutil.MineOverlay(ctx, *pubKey, networkID, o.TargetNeighborhood)
+		targetNeighborhood := o.TargetNeighborhood
+		if o.TargetNeighborhood == "" && o.NeighborhoodSuggester != "" {
+			logger.Info("fetching target neighborhood from suggester", "url", o.NeighborhoodSuggester)
+			targetNeighborhood, err = nbhdutil.FetchNeighborhood(&http.Client{}, o.NeighborhoodSuggester)
+			if err != nil {
+				return nil, fmt.Errorf("neighborhood suggestion: %w", err)
+			}
+		}
+
+		if targetNeighborhood != "" {
+			logger.Info("mining an overlay address for the fresh node to target the selected neighborhood", "target", targetNeighborhood)
+			swarmAddress, nonce, err = nbhdutil.MineOverlay(ctx, *pubKey, networkID, targetNeighborhood)
 			if err != nil {
 				return nil, fmt.Errorf("mine overlay address: %w", err)
 			}
@@ -412,6 +422,7 @@ func NewBee(
 			*publicKey,
 			pssPrivateKey.PublicKey,
 			overlayEthAddress,
+			o.WhitelistedWithdrawalAddress,
 			logger,
 			transactionService,
 			batchStore,
@@ -451,6 +462,7 @@ func NewBee(
 			*publicKey,
 			pssPrivateKey.PublicKey,
 			overlayEthAddress,
+			o.WhitelistedWithdrawalAddress,
 			logger,
 			transactionService,
 			batchStore,
@@ -504,20 +516,9 @@ func NewBee(
 	}
 
 	if o.SwapEnable {
-		chequebookFactory, err = InitChequebookFactory(
-			logger,
-			chainBackend,
-			chainID,
-			transactionService,
-			o.SwapFactoryAddress,
-			o.SwapLegacyFactoryAddresses,
-		)
+		chequebookFactory, err = InitChequebookFactory(logger, chainBackend, chainID, transactionService, o.SwapFactoryAddress)
 		if err != nil {
 			return nil, err
-		}
-
-		if err = chequebookFactory.VerifyBytecode(ctx); err != nil {
-			return nil, fmt.Errorf("factory fail: %w", err)
 		}
 
 		erc20Address, err := chequebookFactory.ERC20Address(ctx)
@@ -754,6 +755,7 @@ func NewBee(
 		RadiusSetter:              kad,
 		WarmupDuration:            o.WarmupTime,
 		Logger:                    logger,
+		Tracer:                    tracer,
 	}
 
 	if o.FullNodeMode && !o.BootnodeMode {
@@ -1069,7 +1071,7 @@ func NewBee(
 	b.resolverCloser = multiResolver
 
 	feedFactory := factory.New(localStore.Download(true))
-	steward := steward.New(localStore, retrieval)
+	steward := steward.New(localStore, retrieval, localStore.Cache())
 
 	extraOpts := api.ExtraOptions{
 		Pingpong:        pingPong,
@@ -1091,11 +1093,12 @@ func NewBee(
 		SyncStatus:      syncStatusFn,
 		NodeStatus:      nodeStatus,
 		PullSync:		 pullSyncProtocol,
+		PinIntegrity:    localStore.PinIntegrity(),
 	}
 
 	if o.APIAddr != "" {
 		if apiService == nil {
-			apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, beeNodeMode, o.ChequebookEnable, o.SwapEnable, chainBackend, o.CORSAllowedOrigins, stamperStore)
+			apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, o.WhitelistedWithdrawalAddress, logger, transactionService, batchStore, beeNodeMode, o.ChequebookEnable, o.SwapEnable, chainBackend, o.CORSAllowedOrigins, stamperStore)
 			apiService.SetProbe(probe)
 			apiService.SetRedistributionAgent(agent)
 		}

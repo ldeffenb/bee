@@ -13,12 +13,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ethersphere/bee/pkg/encryption"
-	"github.com/ethersphere/bee/pkg/log"
-	storage "github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storage/storageutil"
-	"github.com/ethersphere/bee/pkg/storer/internal"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/encryption"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storage/storageutil"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 	"github.com/google/uuid"
 )
 
@@ -42,6 +42,8 @@ var (
 	// errCollectionRootAddressIsZero is returned if the putter is closed with a zero
 	// swarm.Address. Root reference has to be set.
 	errCollectionRootAddressIsZero = errors.New("pin store: collection root address is zero")
+	// errDuplicatePinCollection is returned when attempted to pin the same file repeatedly
+	errDuplicatePinCollection = errors.New("pin store: duplicate pin collection")
 )
 
 // creates a new UUID and returns it as a byte slice
@@ -279,10 +281,24 @@ func (c *collectionPutter) Close(st internal.Storage, writer storage.Writer, roo
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
+	collection := &pinCollectionItem{Addr: root}
+	has, err := st.IndexStore().Has(collection)
+
+	if err != nil {
+		return fmt.Errorf("pin store: check previous root: %w", err)
+	}
+
+	if has {
+		// trigger the Cleanup
+		c.logger.Error(errDuplicatePinCollection, "pinning.Close", "root", root, "UUID", formatUUID(c.collection.UUID))
+		return errDuplicatePinCollection
+	}
+
 	c.logger.Debug("pinning.Close", "root", root, "UUID", formatUUID(c.collection.UUID))
+
 	// Save the root pin reference.
 	c.collection.Addr = root
-	err := writer.Put(c.collection)
+	err = writer.Put(c.collection)
 	if err != nil {
 		return fmt.Errorf("pin store: failed updating collection: %w", err)
 	}

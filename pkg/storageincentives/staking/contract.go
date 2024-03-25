@@ -13,17 +13,17 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethersphere/bee/pkg/sctx"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/transaction"
-	"github.com/ethersphere/bee/pkg/util/abiutil"
+	"github.com/ethersphere/bee/v2/pkg/sctx"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/transaction"
+	"github.com/ethersphere/bee/v2/pkg/util/abiutil"
 	"github.com/ethersphere/go-sw3-abi/sw3abi"
 )
 
 var (
 	MinimumStakeAmount = big.NewInt(100000000000000000)
 
-	erc20ABI = abiutil.MustParseABI(sw3abi.ERC20ABIv0_3_1)
+	erc20ABI = abiutil.MustParseABI(sw3abi.ERC20ABIv0_6_5)
 
 	ErrInsufficientStakeAmount = errors.New("insufficient stake amount")
 	ErrInsufficientFunds       = errors.New("insufficient token balance")

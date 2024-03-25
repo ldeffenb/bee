@@ -16,10 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/ethersphere/bee/pkg/postage"
-	storage "github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storage/storagetest"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storage/storagetest"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"golang.org/x/sync/errgroup"
@@ -52,6 +52,20 @@ func TestStampIssuerMarshalling(t *testing.T) {
 func newTestStampIssuer(t *testing.T, block uint64) *postage.StampIssuer {
 	t.Helper()
 	return newTestStampIssuerMutability(t, block, true)
+}
+
+func newTestStampIssuerID(t *testing.T, block uint64, id []byte) *postage.StampIssuer {
+	t.Helper()
+	return postage.NewStampIssuer(
+		"label",
+		"keyID",
+		id,
+		big.NewInt(3),
+		16,
+		8,
+		block,
+		true,
+	)
 }
 
 func newTestStampIssuerMutability(t *testing.T, block uint64, immutable bool) *postage.StampIssuer {

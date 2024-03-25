@@ -16,16 +16,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/addressbook"
-	"github.com/ethersphere/bee/pkg/discovery"
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/p2p"
-	"github.com/ethersphere/bee/pkg/shed"
-	"github.com/ethersphere/bee/pkg/swarm"
-	"github.com/ethersphere/bee/pkg/topology"
-	im "github.com/ethersphere/bee/pkg/topology/kademlia/internal/metrics"
-	"github.com/ethersphere/bee/pkg/topology/kademlia/internal/waitnext"
-	"github.com/ethersphere/bee/pkg/topology/pslice"
+	"github.com/ethersphere/bee/v2/pkg/addressbook"
+	"github.com/ethersphere/bee/v2/pkg/discovery"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/p2p"
+	"github.com/ethersphere/bee/v2/pkg/shed"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/topology"
+	im "github.com/ethersphere/bee/v2/pkg/topology/kademlia/internal/metrics"
+	"github.com/ethersphere/bee/v2/pkg/topology/kademlia/internal/waitnext"
+	"github.com/ethersphere/bee/v2/pkg/topology/pslice"
 	ma "github.com/multiformats/go-multiaddr"
 	"golang.org/x/sync/errgroup"
 )
@@ -913,7 +913,7 @@ func (k *Kad) recalcDepth() {
 }
 
 // connect connects to a peer and gossips its address to our connected peers,
-// as well as sends the peers we are connected to to the newly connected peer
+// as well as sends the peers we are connected to the newly connected peer
 func (k *Kad) connect(ctx context.Context, peer swarm.Address, ma ma.Multiaddr) error {
 	k.logger.Debug("attempting connect to peer", "peer_address", peer)
 

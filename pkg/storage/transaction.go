@@ -11,9 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ethersphere/bee/pkg/log"
-
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 // ErrTxDone is returned by any operation that is performed on

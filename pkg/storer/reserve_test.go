@@ -12,19 +12,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/postage"
-	batchstore "github.com/ethersphere/bee/pkg/postage/batchstore/mock"
-	postagetesting "github.com/ethersphere/bee/pkg/postage/testing"
-	pullerMock "github.com/ethersphere/bee/pkg/puller/mock"
-	"github.com/ethersphere/bee/pkg/spinlock"
-	"github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/storage/storagetest"
-	chunk "github.com/ethersphere/bee/pkg/storage/testing"
-	"github.com/ethersphere/bee/pkg/storer"
-	"github.com/ethersphere/bee/pkg/storer/internal/chunkstamp"
-	"github.com/ethersphere/bee/pkg/storer/internal/reserve"
-	"github.com/ethersphere/bee/pkg/storer/internal/stampindex"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/v2/pkg/postage"
+	batchstore "github.com/ethersphere/bee/v2/pkg/postage/batchstore/mock"
+	postagetesting "github.com/ethersphere/bee/v2/pkg/postage/testing"
+	pullerMock "github.com/ethersphere/bee/v2/pkg/puller/mock"
+	"github.com/ethersphere/bee/v2/pkg/spinlock"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/storage/storagetest"
+	chunk "github.com/ethersphere/bee/v2/pkg/storage/testing"
+	"github.com/ethersphere/bee/v2/pkg/storer"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/chunkstamp"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/reserve"
+	"github.com/ethersphere/bee/v2/pkg/storer/internal/stampindex"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 func TestIndexCollision(t *testing.T) {
@@ -429,20 +429,18 @@ func TestRadiusManager(t *testing.T) {
 		}
 
 		waitForSize(t, storer.Reserve(), 10)
-
 		waitForRadius(t, storer.Reserve(), 3)
 
 		err = storer.EvictBatch(context.Background(), batch.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		waitForRadius(t, storer.Reserve(), 0)
 	})
 
 	t.Run("radius doesnt change due to non-zero pull rate", func(t *testing.T) {
 		t.Parallel()
-		storer, err := diskStorer(t, dbTestOps(baseAddr, 10, nil, nil, time.Millisecond*10))()
+		storer, err := diskStorer(t, dbTestOps(baseAddr, 10, nil, nil, time.Millisecond*500))()
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -7,8 +7,8 @@ package pinstore
 import (
 	"fmt"
 
-	storage "github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/swarm"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 type (
@@ -23,6 +23,7 @@ var (
 	ErrInvalidPinCollectionItemSize = errInvalidPinCollectionSize
 	ErrPutterAlreadyClosed          = errPutterAlreadyClosed
 	ErrCollectionRootAddressIsZero  = errCollectionRootAddressIsZero
+	ErrDuplicatePinCollection       = errDuplicatePinCollection
 )
 
 var NewUUID = newUUID

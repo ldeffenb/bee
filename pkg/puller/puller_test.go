@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethersphere/bee/pkg/intervalstore"
-	"github.com/ethersphere/bee/pkg/log"
-	"github.com/ethersphere/bee/pkg/puller"
-	mockps "github.com/ethersphere/bee/pkg/pullsync/mock"
-	"github.com/ethersphere/bee/pkg/spinlock"
-	"github.com/ethersphere/bee/pkg/statestore/mock"
-	"github.com/ethersphere/bee/pkg/storage"
-	resMock "github.com/ethersphere/bee/pkg/storer/mock"
-	"github.com/ethersphere/bee/pkg/swarm"
-	kadMock "github.com/ethersphere/bee/pkg/topology/kademlia/mock"
-	"github.com/ethersphere/bee/pkg/util/testutil"
+	"github.com/ethersphere/bee/v2/pkg/log"
+	"github.com/ethersphere/bee/v2/pkg/puller"
+	"github.com/ethersphere/bee/v2/pkg/puller/intervalstore"
+	mockps "github.com/ethersphere/bee/v2/pkg/pullsync/mock"
+	"github.com/ethersphere/bee/v2/pkg/spinlock"
+	"github.com/ethersphere/bee/v2/pkg/statestore/mock"
+	"github.com/ethersphere/bee/v2/pkg/storage"
+	resMock "github.com/ethersphere/bee/v2/pkg/storer/mock"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
+	kadMock "github.com/ethersphere/bee/v2/pkg/topology/kademlia/mock"
+	"github.com/ethersphere/bee/v2/pkg/util/testutil"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -438,11 +438,12 @@ func TestContinueSyncing(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	kad.Trigger()
-	time.Sleep(time.Second)
 
-	calls := len(pullsync.SyncCalls(addr))
-	if calls != 1 {
-		t.Fatalf("unexpected amount of calls, got %d", calls)
+	err := spinlock.Wait(time.Second, func() bool {
+		return len(pullsync.SyncCalls(addr)) == 1
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -9,10 +9,10 @@ import (
 	"errors"
 	"testing"
 
-	postagetesting "github.com/ethersphere/bee/pkg/postage/testing"
-	storage "github.com/ethersphere/bee/pkg/storage"
-	chunktest "github.com/ethersphere/bee/pkg/storage/testing"
-	"github.com/ethersphere/bee/pkg/swarm"
+	postagetesting "github.com/ethersphere/bee/v2/pkg/postage/testing"
+	storage "github.com/ethersphere/bee/v2/pkg/storage"
+	chunktest "github.com/ethersphere/bee/v2/pkg/storage/testing"
+	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 // TestChunkStore runs a correctness test suite on a given ChunkStore.
@@ -92,6 +92,15 @@ func TestChunkStore(t *testing.T, st storage.ChunkStore) {
 			// Delete all even numbered indexes along with 0
 			if idx%2 == 0 {
 				err := st.Delete(context.TODO(), ch.Address())
+				if err != nil {
+					t.Fatalf("failed deleting chunk: %v", err)
+				}
+				_, err = st.Get(context.TODO(), ch.Address())
+				if err != nil {
+					t.Fatalf("expected no error, found: %v", err)
+				}
+				// delete twice as it was put twice
+				err = st.Delete(context.TODO(), ch.Address())
 				if err != nil {
 					t.Fatalf("failed deleting chunk: %v", err)
 				}
