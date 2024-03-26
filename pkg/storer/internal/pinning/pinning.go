@@ -320,7 +320,9 @@ func (c *collectionPutter) Cleanup(tx internal.TxExecutor) error {
 		return nil
 	}
 
-	c.logger.Debug("pinning.Cleanup", "UUID", formatUUID(c.collection.UUID))
+	if c.logger != nil {
+		c.logger.Debug("pinning.Cleanup", "UUID", formatUUID(c.collection.UUID))
+	}
 	if err := deleteCollectionChunks(context.Background(), tx, c.collection.UUID, c.logger); err != nil {
 		return fmt.Errorf("pin store: failed deleting collection chunks: %w", err)
 	}
@@ -402,7 +404,9 @@ func Pins(st storage.Store, offset, limit int) ([]swarm.Address, error) {
 }
 
 func deleteCollectionChunks(ctx context.Context, tx internal.TxExecutor, collectionUUID []byte, logger log.Logger) error {
-	logger.Debug("pinning.deleteCollectionChunks", "UUID", formatUUID(collectionUUID))
+	if logger != nil {
+		logger.Debug("pinning.deleteCollectionChunks", "UUID", formatUUID(collectionUUID))
+	}
 	chunksToDelete := make([]*pinChunkItem, 0)
 	err := tx.Execute(ctx, func(s internal.Storage) error {
 		return s.IndexStore().Iterate(
@@ -434,7 +438,9 @@ func deleteCollectionChunks(ctx context.Context, tx internal.TxExecutor, collect
 			}
 
 			for _, chunk := range chunksToDelete[i:end] {
-				logger.Debug("pinning.deleteCollectionChunks w/ChunkStore.Delete", "chunk", chunk.Addr, "UUID", formatUUID(collectionUUID))
+				if logger != nil {
+					logger.Debug("pinning.deleteCollectionChunks w/ChunkStore.Delete", "chunk", chunk.Addr, "UUID", formatUUID(collectionUUID))
+				}
 				err := b.Delete(chunk)
 				if err != nil {
 					return fmt.Errorf("pin store: failed deleting collection chunk: %w", err)
