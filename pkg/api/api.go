@@ -138,6 +138,10 @@ type PinIntegrity interface {
 	Check(ctx context.Context, logger log.Logger, pin string, out chan storer.PinStat)
 }
 
+type PinIntegrity interface {
+	Check(ctx context.Context, logger log.Logger, pin string, out chan storer.PinStat)
+}
+
 type Service struct {
 	auth            auth.Authenticator
 	storer          Storer
