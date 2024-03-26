@@ -116,11 +116,6 @@ func (c *Cache) Putter(store internal.Storage) storage.Putter {
 		c.glock.RLock()
 		defer c.glock.RUnlock()
 
-		c.chunkLock.Lock(chunk.Address().ByteString())
-		defer c.chunkLock.Unlock(chunk.Address().ByteString())
-		c.glock.RLock()
-		defer c.glock.RUnlock()
-
 		newEntry := &cacheEntry{Address: chunk.Address()}
 		found, err := store.IndexStore().Has(newEntry)
 		if err != nil {
