@@ -28,3 +28,10 @@ _testmain.go
 *.prof
 
 .DS_Store
+/apiVersion.txt
+/commit.txt
+/commitClean.txt
+/commitHash.txt
+/commitTime.txt
+/debugVersion.txt
+/version.txt
