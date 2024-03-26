@@ -358,11 +358,7 @@ func (g *decoder) save(missing []int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for _, i := range missing {
-<<<<<<< HEAD
 		if err := g.putter.Put(context.Background(), swarm.NewChunk(g.addrs[i], g.rsbuf[i]), "Redundancy.get.save"); err != nil {
-=======
-		if err := g.putter.Put(context.Background(), swarm.NewChunk(g.addrs[i], g.rsbuf[i])); err != nil {
->>>>>>> master
 			return err
 		}
 	}
