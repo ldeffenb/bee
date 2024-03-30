@@ -125,7 +125,7 @@ func (s *Service) peerSyncBatchHandler(w http.ResponseWriter, r *http.Request) {
 
 	paths := struct {
 		Address swarm.Address `map:"address" validate:"required"`
-		Bin uint8 `map:"bin" validate:"required"`
+		Bin uint8 `map:"bin" validate:"required,min=0,max=31"`
 		Start uint64 `map:"start" validate:"required"`
 
 //		BatchID []byte `map:"batch_id" validate:"required,len=32"`
