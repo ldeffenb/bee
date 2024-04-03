@@ -579,7 +579,7 @@ func remove(st internal.Storage, writer storage.Writer, address swarm.Address, b
 
 	err := st.IndexStore().Get(ui)
 	if err != nil {
-		return fmt.Errorf("failed to read uploadItem %s: %w", ui, err)
+		return fmt.Errorf("failed to read uploadItem %s: %w", ui.Address, err)
 	}
 
 	err = writer.Delete(ui)
@@ -647,7 +647,7 @@ func Report(
 
 	err := s.IndexStore().Get(ui)
 	if err != nil {
-		return fmt.Errorf("failed to read uploadItem %s: %w", ui, err)
+		return fmt.Errorf("failed to read uploadItem %s: %w", ui.Address, err)
 	}
 
 	ti := &TagItem{
