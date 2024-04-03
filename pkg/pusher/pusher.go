@@ -301,6 +301,9 @@ func (s *Service) pushDeferred(ctx context.Context, logger log.Logger, op *Op) (
 		loggerV1.Debug("reporting", "chunk_address", op.Chunk.Address())
 		if err := s.storer.Report(ctx, op.Chunk, storage.ChunkSynced); err != nil {
 			loggerV1.Error(err, "pusher: failed to report sync status")
+			if errors.Is(err, storage.ErrNotFound) {	// TODO: Ignore this error until uploadItem duplication is fixed
+				return false, nil
+			}
 			return true, err
 		}
 	default:
