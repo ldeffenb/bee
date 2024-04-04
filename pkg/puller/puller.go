@@ -339,17 +339,17 @@ func (p *Puller) syncPeerBin(parentCtx context.Context, peer *syncPeer, bin uint
 
 			if top == math.MaxUint64 {
 				p.metrics.MaxUintErrCounter.Inc()
-				p.logger.Error(nil, "syncWorker max uint64 encountered, quitting", "peer_address", address, "bin", bin, "from", start, "topmost", top)
+				p.logger.Error(nil, "syncWorker max uint64 encountered, quitting", "peer_address", address, "bin", bin, "from", start, "cursor", cursor, "topmost", top)
 				return
 			}
 
 			if err != nil {
 				p.metrics.SyncWorkerErrCounter.Inc()
 				if errors.Is(err, p2p.ErrPeerNotFound) {
-					p.logger.Debug("syncWorker interval failed, quitting", "error", err, "peer_address", address, "bin", bin, "cursor", address, "start", start, "topmost", top)
+					p.logger.Debug("syncWorker interval failed, quitting", "error", err, "peer_address", address, "bin", bin, "isHistorical", isHistorical, "start", start, "cursor", cursor, "topmost", top)
 					return
 				}
-				loggerV2.Debug("syncWorker interval failed", "error", err, "peer_address", address, "bin", bin, "cursor", address, "start", start, "topmost", top)
+				loggerV2.Debug("syncWorker interval failed", "error", err, "peer_address", address, "bin", bin, "isHistorical", isHistorical, "start", start, "cursor", cursor, "topmost", top)
 			}
 
 			if isHistorical {
@@ -366,7 +366,7 @@ func (p *Puller) syncPeerBin(parentCtx context.Context, peer *syncPeer, bin uint
 					p.logger.Error(err, "syncWorker could not persist interval for peer, quitting", "peer_address", address)
 					return
 				}
-				loggerV2.Debug("syncWorker pulled", "bin", bin, "start", start, "topmost", top, "isHistorical", isHistorical, "duration", time.Since(syncStart), "peer_address", address)
+				loggerV2.Debug("syncWorker pulled", "bin", bin, "start", start, "cursor", cursor, "topmost", top, "isHistorical", isHistorical, "duration", time.Since(syncStart), "peer_address", address)
 				start = top + 1
 			}
 		}
