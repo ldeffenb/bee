@@ -295,6 +295,9 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 // batch and the total number of chunks the downstream peer has sent.
 func (s *Syncer) Sync(ctx context.Context, peer swarm.Address, bin uint8, start uint64) (uint64, int, error) {
 
+	s.logger.Debug("pullsyncing peer", "peer_address", peer, "bin", bin, "start", start)
+	syncStart := time.Now()
+
 	stream, err := s.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
 	if err != nil {
 		return 0, 0, fmt.Errorf("new stream: %w", err)
@@ -340,6 +343,7 @@ func (s *Syncer) Sync(ctx context.Context, peer swarm.Address, bin uint8, start 
 		return 0, 0, fmt.Errorf("new bitvector: %w", err)
 	}
 
+	s.logger.Debug("pullsyncing peer", "peer_address", peer, "bin", bin, "start", start, "offered", len(offer.Chunks))
 	for i := 0; i < len(offer.Chunks); i++ {
 
 		addr := offer.Chunks[i].Address
@@ -454,6 +458,7 @@ func (s *Syncer) Sync(ctx context.Context, peer swarm.Address, bin uint8, start 
 		}
 	}
 
+	s.logger.Debug("pullsynced peer", "peer_address", peer, "bin", bin, "start", start, "topmost", topmost, "chunksPut", chunksPut, "duration", time.Since(syncStart))
 	return topmost, chunksPut, chunkErr
 }
 
@@ -577,7 +582,8 @@ type collectAddrsResult struct {
 // After the arrival of the first chunk, the subsequent chunks have a limited amount of time to arrive,
 // after which the function returns the collected slice of chunks.
 func (s *Syncer) collectAddrs(ctx context.Context, bin uint8, start uint64) ([]*storer.BinC, uint64, error) {
-	loggerV2 := s.logger.V(2).Register()
+//	loggerV2 := s.logger.V(2).Register()
+	loggerV2 := s.logger
 
 	v, _, err := s.intervalsSF.Do(ctx, sfKey(bin, start), func(ctx context.Context) (*collectAddrsResult, error) {
 		var (
@@ -665,7 +671,8 @@ func (s *Syncer) processWant(ctx context.Context, o *pb.Offer, w *pb.Want) ([]sw
 }
 
 func (s *Syncer) GetCursors(ctx context.Context, peer swarm.Address) (retr []uint64, epoch uint64, err error) {
-	loggerV2 := s.logger.V(2).Register()
+//	loggerV2 := s.logger.V(2).Register()
+	loggerV2 := s.logger
 
 	stream, err := s.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, cursorStreamName)
 	if err != nil {
@@ -696,7 +703,8 @@ func (s *Syncer) GetCursors(ctx context.Context, peer swarm.Address) (retr []uin
 }
 
 func (s *Syncer) cursorHandler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
-	loggerV2 := s.logger.V(2).Register()
+//	loggerV2 := s.logger.V(2).Register()
+	loggerV2 := s.logger
 
 	w, r := protobuf.NewWriterAndReader(stream)
 	loggerV2.Debug("peer wants cursors", "peer_address", p.Address)

@@ -185,7 +185,8 @@ func (p *Puller) manage(ctx context.Context) {
 // disconnectPeer cancels all existing syncing and removes the peer entry from the syncing map.
 // Must be called under lock.
 func (p *Puller) disconnectPeer(addr swarm.Address) {
-	loggerV2 := p.logger.V(2).Register()
+//	loggerV2 := p.logger.V(2).Register()
+	loggerV2 := p.logger
 
 	loggerV2.Debug("disconnecting peer", "peer_address", addr)
 	if peer, ok := p.syncPeers[addr.ByteString()]; ok {
@@ -289,7 +290,8 @@ func (p *Puller) syncPeer(ctx context.Context, peer *syncPeer, storageRadius uin
 // syncPeerBin will start historical and live syncing for the peer for a particular bin.
 // Must be called under syncPeer lock.
 func (p *Puller) syncPeerBin(parentCtx context.Context, peer *syncPeer, bin uint8, cursor uint64) {
-	loggerV2 := p.logger.V(2).Register()
+//	loggerV2 := p.logger.V(2).Register()
+	loggerV2 := p.logger
 
 	ctx, cancel := context.WithCancel(parentCtx)
 	peer.setBinCancel(cancel, bin)
