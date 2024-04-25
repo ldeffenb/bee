@@ -42,7 +42,7 @@ var (
 	// errCollectionRootAddressIsZero is returned if the putter is closed with a zero
 	// swarm.Address. Root reference has to be set.
 	errCollectionRootAddressIsZero = errors.New("pin store: collection root address is zero")
-	// errDuplicatePinCollection is returned when attempted to pin the same file repeatedly
+	// ErrDuplicatePinCollection is returned when attempted to pin the same file repeatedly
 	ErrDuplicatePinCollection = errors.New("pin store: duplicate pin collection")
 )
 
