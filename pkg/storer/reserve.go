@@ -178,7 +178,7 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 			if err != nil {
 				db.logger.Error(err, "reserve set radius")
 			}
-			db.logger.Info("reserve radius decrease", "radius", radius)
+			db.logger.Info("reserve radius decrease", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()))
 		}
 		db.metrics.StorageRadius.Set(float64(radius))
 	}
@@ -451,13 +451,13 @@ func (db *DB) unreserve(ctx context.Context) (err error) {
 			}
 
 			if totalEvicted >= target {
-				db.logger.Info("unreserve finished", "evicted", totalEvicted, "radius", radius)
+				db.logger.Info("unreserve finished", "evicted", totalEvicted, "target", target, "radius", radius)
 				return nil
 			}
 		}
 
 		radius++
-		db.logger.Info("reserve radius increase", "radius", radius)
+		db.logger.Info("reserve radius increase", "radius", radius, "evicted", totalEvicted, "target", target)
 		_ = db.reserve.SetRadius(db.repo.IndexStore(), radius)
 	}
 
