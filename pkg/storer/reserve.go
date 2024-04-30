@@ -180,7 +180,7 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 			}
 			db.logger.Info("reserve radius decrease", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size())
 		} else {
-			db.logger.Info("reserve radius worker", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size())
+			db.logger.Info("reserve radius worker", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size(), "syncrate", db.syncer.SyncRate())
 		}
 		db.metrics.StorageRadius.Set(float64(radius))
 	}
@@ -415,7 +415,7 @@ func (db *DB) unreserve(ctx context.Context) (err error) {
 	if target <= 0 {
 		return nil
 	}
-	db.logger.Info("unreserve start", "target", target, "radius", radius)
+	db.logger.Info("unreserve start", "target", target, "radius", radius, "size", db.reserve.Size())
 
 	batchExpiry, unsub := db.events.Subscribe(batchExpiry)
 	defer unsub()
