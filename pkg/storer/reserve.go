@@ -179,6 +179,8 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 				db.logger.Error(err, "reserve set radius")
 			}
 			db.logger.Info("reserve radius decrease", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size())
+		} else {
+			db.logger.Info("reserve radius worker", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size())
 		}
 		db.metrics.StorageRadius.Set(float64(radius))
 	}
