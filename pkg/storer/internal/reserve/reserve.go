@@ -220,11 +220,14 @@ func (r *Reserve) IsReserved(store storage.Store, addr swarm.Address) (uint32, e
 	r.logger.Info("Building reserve shadow counts")
 	start := time.Now()
 	counts := make(map[string]uint32)
+	multiStampCount := 0
+	
 //	var found uint32
 	err := IterateReserve(store, func(bri *BatchRadiusItem) (bool, error) {
 		counts[bri.Address.String()]++
 		if counts[bri.Address.String()] > 1 {
-			r.logger.Debug("shadow reserve > 1", "address", bri.Address, "count", counts[bri.Address.String()])
+			multiStampCount++
+			//r.logger.Debug("shadow reserve > 1", "address", bri.Address, "count", counts[bri.Address.String()])
 		}
 //		_, exists := counts[bri.Address.String()]
 //		if exists {
@@ -239,7 +242,7 @@ func (r *Reserve) IsReserved(store storage.Store, addr swarm.Address) (uint32, e
 		return false, nil
 	})
 	r.counts = counts
-	r.logger.Info("Built reserve shadow counts", "count", len(counts), "elapsed", time.Since(start).Round(time.Millisecond))
+	r.logger.Info("Built reserve shadow counts", "count", len(counts), "multiStamp", multiStampCount, "elapsed", time.Since(start).Round(time.Millisecond))
 	r.countsMutex.RLock()
 	defer r.countsMutex.RUnlock()
 	return r.counts[addrString], err
