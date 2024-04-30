@@ -169,6 +169,7 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 		case <-ticker.C:
 		}
 
+		dur := captureDuration(time.Now())
 		count := countFn()
 		radius := db.StorageRadius()
 
@@ -178,9 +179,9 @@ func (db *DB) reserveSizeWithinRadiusWorker(ctx context.Context) {
 			if err != nil {
 				db.logger.Error(err, "reserve set radius")
 			}
-			db.logger.Info("reserve radius decrease", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size())
+			db.logger.Info("reserve radius decrease", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size(), "duration(sec)", dur())
 		} else {
-			db.logger.Info("reserve radius worker", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size(), "syncrate", db.syncer.SyncRate())
+			db.logger.Info("reserve radius worker", "radius", radius, "count", count, "threshold", threshold(db.reserve.Capacity()), "size", db.reserve.Size(), "syncrate", db.syncer.SyncRate(), "duration(sec)", dur())
 		}
 		db.metrics.StorageRadius.Set(float64(radius))
 	}
