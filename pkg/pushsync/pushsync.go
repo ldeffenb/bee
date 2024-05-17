@@ -50,7 +50,7 @@ const (
 )
 
 const (
-	maxMultiplexForwards = 2 // number of extra peers to forward the request from the multiplex node
+	maxMultiplexForwards = 0 ///2 // number of extra peers to forward the request from the multiplex node
 	maxPushErrors        = 32
 )
 
@@ -418,6 +418,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 						ps.logger.Debug("pushTrace:pushToClosest:paralleling NOT", "chunk", ch.Address(), "nextPeer", nextPeer, "proximity", nextProx, "radius", ps.store.StorageRadius())
 						break
 					} else {
+						ps.logger.Debug("pushTrace:pushToClosest:paralleling DO", "chunk", ch.Address(), "peer", nextPeer, "proximity", nextProx, "radius", ps.store.StorageRadius())
 						retry("parallelForwards("+strconv.Itoa(parallelForwards)+")")
 						sentErrorsLeft++
 					}
@@ -503,6 +504,7 @@ func (ps *PushSync) push(parentCtx context.Context, resultChan chan<- receiptRes
 		select {
 		case resultChan <- receiptResult{pushTime: now, peer: peer, err: err, receipt: receipt}:
 		case <-parentCtx.Done():
+			ps.logger.Debug("pushTrace:push ctxDone", "chunk", ch.Address(), "peer", peer)
 		}
 	}()
 
