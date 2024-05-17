@@ -420,6 +420,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 			ps.metrics.TotalSendAttempts.Inc()
 			inflight++
 
+			ps.logger.Debug("pushTrace:pushToClosest:pushing", "chunk", ch.Address(), "peer", peer)
 			go ps.push(ctx, resultChan, peer, ch, action)
 
 		case result := <-resultChan:
@@ -429,6 +430,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 			ps.measurePushPeer(result.pushTime, result.err)
 
 			if result.err == nil {
+				ps.logger.Debug("pushTrace:pushToClosest:result", "chunk", ch.Address(), "peer", result.peer)
 				return result.receipt, nil
 			}
 
@@ -477,8 +479,10 @@ func (ps *PushSync) push(parentCtx context.Context, resultChan chan<- receiptRes
 	defer func() {
 		if err != nil {
 			ext.LogError(spanInner, err)
+			ps.logger.Debug("pushTrace:push err", "chunk", ch.Address(), "peer", peer, "err", err)
 		} else {
 			spanInner.LogFields(olog.Bool("success", true))
+			ps.logger.Debug("pushTrace:push success", "chunk", ch.Address(), "peer", peer)
 		}
 		spanInner.Finish()
 		select {
