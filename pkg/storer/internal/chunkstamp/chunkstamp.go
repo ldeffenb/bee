@@ -171,7 +171,7 @@ func LoadWithBatchID(s storage.Reader, namespace string, addr swarm.Address, bat
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("stamp not found for batchID %x: %w", batchID, storage.ErrNotFound)
+		return nil, fmt.Errorf("stamp not found for addr %s batchID %x: %w", addr, batchID, storage.ErrNotFound)
 	}
 
 	return stamp, nil
