@@ -7,6 +7,7 @@ package upload
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -440,7 +441,7 @@ func (u *uploadPutter) Put(ctx context.Context, st transaction.Store, chunk swar
 		TagID:     u.tagID,
 	}
 	
-	u.logger.Debug("uploadTrace:uploadPutter.Put", "address", pi.Address, "batch", pi.BatchID)
+	u.logger.Debug("uploadTrace:uploadPutter.Put", "address", pi.Address, "batch", hex.EncodeToString(pi.BatchID))
 
 	return errors.Join(
 		st.IndexStore().Put(ui),
@@ -519,7 +520,7 @@ func (u *uploadPutter) Cleanup(st transaction.Storage) error {
 	eg.SetLimit(runtime.NumCPU())
 
 	for _, item := range itemsToDelete {
-		u.logger.Debug("uploadTrace:uploadPutter.Cleanup pushItem/chunkstamp Delete", "tag", u.tagID, "address", item.Address, "batch", item.BatchID)
+		u.logger.Debug("uploadTrace:uploadPutter.Cleanup pushItem/chunkstamp Delete", "tag", u.tagID, "address", item.Address, "batch", hex.EncodeToString(item.BatchID))
 		func(item *pushItem) {
 			eg.Go(func() error {
 				return st.Run(context.Background(), func(s transaction.Store) error {
@@ -577,7 +578,7 @@ func Report(ctx context.Context, st transaction.Store, chunk swarm.Chunk, state 
 
 	err := indexStore.Get(ui)
 	if err != nil {
-		logger.Debug("uploadTrace:Report", "address", ui.Address, "batch", ui.BatchID, "err", err)
+		logger.Debug("uploadTrace:Report", "address", ui.Address, "batch", hex.EncodeToString(ui.BatchID), "err", err)
 
 		// because of the nature of the feed mechanism of the uploadstore/pusher, a chunk that is in inflight may be sent more than once to the pusher.
 		// this is because the chunks are removed from the queue only when they are synced, not at the start of the upload
@@ -587,7 +588,7 @@ func Report(ctx context.Context, st transaction.Store, chunk swarm.Chunk, state 
 
 		return fmt.Errorf("failed to read uploadItem %s: %w", ui, err)
 	}
-	logger.Debug("uploadTrace:Report", "address", ui.Address, "batch", ui.BatchID, "tag", ui.TagID)
+	logger.Debug("uploadTrace:Report", "address", ui.Address, "batch", hex.EncodeToString(ui.BatchID), "tag", ui.TagID)
 
 	ti := &TagItem{TagID: ui.TagID}
 	err = indexStore.Get(ti)
@@ -626,7 +627,7 @@ func Report(ctx context.Context, st transaction.Store, chunk swarm.Chunk, state 
 		BatchID:   chunk.Stamp().BatchID(),
 	}
 
-	logger.Debug("uploadTrace:Report pushItem/chunkstamp Delete", "address", pi.Address, "batch", pi.BatchID)
+	logger.Debug("uploadTrace:Report pushItem/chunkstamp Delete", "address", pi.Address, "batch", hex.EncodeToString(pi.BatchID))
 
 	return errors.Join(
 		indexStore.Delete(pi),
@@ -746,7 +747,7 @@ func IteratePending(ctx context.Context, s transaction.ReadOnlyStore, logger log
 
 		stamp, err := chunkstamp.LoadWithBatchID(s.IndexStore(), chunkStampNamespace, chunk.Address(), pi.BatchID)
 		if err != nil {
-			logger.Debug("uploadTrace:IteratePending LoadWithBatchID failed", "address", chunk.Address(), "batch", pi.BatchID, "err", err)
+			logger.Debug("uploadTrace:IteratePending LoadWithBatchID failed", "address", chunk.Address(), "batch", hex.EncodeToString(pi.BatchID), "err", err)
 			return true, err
 		}
 
@@ -754,7 +755,7 @@ func IteratePending(ctx context.Context, s transaction.ReadOnlyStore, logger log
 			WithStamp(stamp).
 			WithTagID(uint32(pi.TagID))
 
-		logger.Debug("uploadTrace:IteratePending", "address", chunk.Address(), "batch", pi.BatchID)
+		logger.Debug("uploadTrace:IteratePending", "address", chunk.Address(), "batch", hex.EncodeToString(pi.BatchID))
 
 		return consumerFn(chunk)
 	})
