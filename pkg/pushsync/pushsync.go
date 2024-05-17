@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ethersphere/bee/v2/pkg/accounting"
@@ -341,7 +342,8 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 	retryC := make(chan struct{}, parallelForwards)
 
-	retry := func() {
+	retry := func(why string) {
+		ps.logger.Debug("pushTrace:pushToClosest:retry", "chunk", ch.Address(), "why", why)
 		select {
 		case retryC <- struct{}{}:
 		case <-ctx.Done():
@@ -349,14 +351,14 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 		}
 	}
 
-	retry()
+	retry("initial")
 
 	for sentErrorsLeft > 0 {
 		select {
 		case <-ctx.Done():
 			return nil, ErrNoPush
 		case <-preemptiveTicker:
-			retry()
+			retry("preemptiveTicker")
 		case <-retryC:
 
 			// Origin peers should not store the chunk initially so that the chunk is always forwarded into the network.
@@ -383,7 +385,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 				select {
 				case <-time.After(overDraftRefresh):
-					retry()
+					retry("overDraftRefresh")
 					continue
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -402,14 +404,14 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 			// act as the multiplexer and push the chunk in parallel to multiple peers
 			if swarm.Proximity(peer.Bytes(), ch.Address().Bytes()) >= ps.store.StorageRadius() {
 				for ; parallelForwards > 0; parallelForwards-- {
-					retry()
+					retry("parallelForwards("+strconv.Itoa(parallelForwards)+")")
 					sentErrorsLeft++
 				}
 			}
 
 			action, err := ps.prepareCredit(ctx, peer, ch, origin)
 			if err != nil {
-				retry()
+				retry("prepareCredit err")
 				ps.skipList.Add(ch.Address(), peer, overDraftRefresh)
 				continue
 			}
@@ -435,7 +437,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 			sentErrorsLeft--
 
-			retry()
+			retry("result err")
 		}
 	}
 
