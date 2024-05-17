@@ -588,7 +588,16 @@ func Report(ctx context.Context, st transaction.Store, chunk swarm.Chunk, state 
 
 		return fmt.Errorf("failed to read uploadItem %s: %w", ui, err)
 	}
-	logger.Debug("uploadTrace:Report", "address", ui.Address, "batch", hex.EncodeToString(ui.BatchID), "tag", ui.TagID)
+
+	stateText := "Unknown("+strconv.Itoa(state)+")"
+	switch (state) {
+	case storage.ChunkSent: stateText = "ChunkSent";
+	case storage.ChunkStored: stateText = "ChunkStored";
+	case storage.ChunkSynced: stateText = "ChunkSynced";
+	case storage.ChunkCouldNotSync: stateText = "ChunkCouldNotSync";
+	}
+
+	logger.Debug("uploadTrace:Report", "address", ui.Address, "batch", hex.EncodeToString(ui.BatchID), "tag", ui.TagID, "state", stateText)
 
 	ti := &TagItem{TagID: ui.TagID}
 	err = indexStore.Get(ti)
@@ -627,7 +636,7 @@ func Report(ctx context.Context, st transaction.Store, chunk swarm.Chunk, state 
 		BatchID:   chunk.Stamp().BatchID(),
 	}
 
-	logger.Debug("uploadTrace:Report pushItem/chunkstamp Delete", "address", pi.Address, "batch", hex.EncodeToString(pi.BatchID))
+	logger.Debug("uploadTrace:Report pushItem/chunkstamp Delete", "address", pi.Address, "batch", hex.EncodeToString(pi.BatchID), "state", stateText)
 
 	return errors.Join(
 		indexStore.Delete(pi),
