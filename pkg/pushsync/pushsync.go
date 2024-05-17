@@ -405,11 +405,22 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 			prox := swarm.Proximity(peer.Bytes(), ch.Address().Bytes())
 			if prox >= ps.store.StorageRadius() {
 				if (parallelForwards > 0) {
-					ps.logger.Debug("pushTrace:pushToClosest:paralleling", "chunk", ch.Address(), "peer", peer, "proximity", prox, "radius", ps.store.StorageRadius(), "parallels", parallelForwards)
+					ps.logger.Debug("pushTrace:pushToClosest:paralleling TRY", "chunk", ch.Address(), "peer", peer, "proximity", prox, "radius", ps.store.StorageRadius(), "parallels", parallelForwards)
 				}
 				for ; parallelForwards > 0; parallelForwards-- {
-					retry("parallelForwards("+strconv.Itoa(parallelForwards)+")")
-					sentErrorsLeft++
+					nextPeer, nextErr := ps.closestPeer(ch.Address(), origin)
+					if (nextErr != nil) {
+						ps.logger.Debug("pushTrace:pushToClosest:paralleling err", "chunk", ch.Address(), "err", nextErr)
+						break
+					}
+					nextProx := swarm.Proximity(nextPeer.Bytes(), ch.Address().Bytes())
+					if (nextProx < ps.store.StorageRadius()) {
+						ps.logger.Debug("pushTrace:pushToClosest:paralleling NOT", "chunk", ch.Address(), "nextPeer", nextPeer, "proximity", nextProx, "radius", ps.store.StorageRadius())
+						break
+					} else {
+						retry("parallelForwards("+strconv.Itoa(parallelForwards)+")")
+						sentErrorsLeft++
+					}
 				}
 			}
 
