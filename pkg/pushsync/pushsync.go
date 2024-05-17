@@ -50,7 +50,7 @@ const (
 )
 
 const (
-	maxMultiplexForwards = 0 ///2 // number of extra peers to forward the request from the multiplex node
+	maxMultiplexForwards = 0 //2 // number of extra peers to forward the request from the multiplex node
 	maxPushErrors        = 32
 )
 
@@ -340,7 +340,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 	resultChan := make(chan receiptResult)
 
-	retryC := make(chan struct{}, parallelForwards)
+	retryC := make(chan struct{}, max(1,parallelForwards))	// Need room for at least one!
 
 	retry := func(why string) {
 		ps.logger.Debug("pushTrace:pushToClosest:retry", "chunk", ch.Address(), "why", why)
@@ -354,12 +354,14 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 	retry("initial")
 
 	for sentErrorsLeft > 0 {
+		ps.logger.Debug("pushTrace:pushToClosest:loop", "chunk", ch.Address(), "errorsLeft", sentErrorsLeft)
 		select {
 		case <-ctx.Done():
 			return nil, ErrNoPush
 		case <-preemptiveTicker:
 			retry("preemptiveTicker")
 		case <-retryC:
+			ps.logger.Debug("pushTrace:pushToClosest:retryC", "chunk", ch.Address(), "errorsLeft", sentErrorsLeft)
 
 			// Origin peers should not store the chunk initially so that the chunk is always forwarded into the network.
 			// If no peer can be found from an origin peer, the origin peer may store the chunk.
