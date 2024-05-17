@@ -11,6 +11,7 @@ import (
 	"io"
 
 	"github.com/ethersphere/bee/v2/pkg/cac"
+	"github.com/ethersphere/bee/v2/pkg/log"
 	"github.com/ethersphere/bee/v2/pkg/sharky"
 	"github.com/ethersphere/bee/v2/pkg/soc"
 	"github.com/ethersphere/bee/v2/pkg/swarm"
@@ -237,7 +238,7 @@ type PullSubscriber interface {
 }
 
 type PushSubscriber interface {
-	SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, stop func())
+	SubscribePush(ctx context.Context, logger log.Logger) (c <-chan swarm.Chunk, stop func())
 }
 
 type ChunkState = int
@@ -260,7 +261,7 @@ const (
 
 // PushReporter is used to report chunk state.
 type PushReporter interface {
-	Report(context.Context, swarm.Chunk, ChunkState) error
+	Report(context.Context, swarm.Chunk, ChunkState, log.Logger) error
 }
 
 // ErrBatchCommitted is returned by Batch.Commit

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ethersphere/bee/v2/pkg/log"
 	storage "github.com/ethersphere/bee/v2/pkg/storage"
 	"github.com/ethersphere/bee/v2/pkg/storer/internal"
 	pinstore "github.com/ethersphere/bee/v2/pkg/storer/internal/pinning"
@@ -22,13 +23,13 @@ const uploadsLock = "pin-upload-store"
 
 // Report implements the storage.PushReporter by wrapping the internal reporter
 // with a transaction.
-func (db *DB) Report(ctx context.Context, chunk swarm.Chunk, state storage.ChunkState) error {
+func (db *DB) Report(ctx context.Context, chunk swarm.Chunk, state storage.ChunkState, logger log.Logger) error {
 
 	unlock := db.Lock(uploadsLock)
 	defer unlock()
 
 	err := db.storage.Run(ctx, func(s transaction.Store) error {
-		return upload.Report(ctx, s, chunk, state)
+		return upload.Report(ctx, s, chunk, state, logger)
 	})
 	if err != nil {
 		return fmt.Errorf("reporter.Report: %w", err)
@@ -50,7 +51,7 @@ func (db *DB) Upload(ctx context.Context, pin bool, tagID uint64) (PutterSession
 	)
 
 	err = db.storage.Run(ctx, func(s transaction.Store) error {
-		uploadPutter, err = upload.NewPutter(s.IndexStore(), tagID)
+		uploadPutter, err = upload.NewPutter(s.IndexStore(), tagID, db.logger)
 		if err != nil {
 			return fmt.Errorf("upload.NewPutter: %w", err)
 		}

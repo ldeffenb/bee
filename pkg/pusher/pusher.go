@@ -128,7 +128,7 @@ func (s *Service) chunksWorker(warmupTime time.Duration) {
 
 	// inflight.set handles the backpressure for the maximum amount of inflight chunks
 	// and duplicate handling.
-	chunks, unsubscribe := s.storer.SubscribePush(ctx)
+	chunks, unsubscribe := s.storer.SubscribePush(ctx, s.logger)
 	defer func() {
 		unsubscribe()
 		cancel()
@@ -266,7 +266,7 @@ func (s *Service) pushDeferred(ctx context.Context, logger log.Logger, op *Op) (
 			"error", err,
 		)
 
-		return false, errors.Join(err, s.storer.Report(ctx, op.Chunk, storage.ChunkCouldNotSync))
+		return false, errors.Join(err, s.storer.Report(ctx, op.Chunk, storage.ChunkCouldNotSync, logger))
 	}
 
 	switch receipt, err := s.pushSyncer.PushChunkToClosest(ctx, op.Chunk); {
@@ -278,7 +278,7 @@ func (s *Service) pushDeferred(ctx context.Context, logger log.Logger, op *Op) (
 			loggerV1.Error(err, "pusher: failed to store chunk")
 			return true, err
 		}
-		err = s.storer.Report(ctx, op.Chunk, storage.ChunkStored)
+		err = s.storer.Report(ctx, op.Chunk, storage.ChunkStored, logger)
 		if err != nil {
 			loggerV1.Error(err, "pusher: failed reporting chunk")
 			return true, err
@@ -288,7 +288,7 @@ func (s *Service) pushDeferred(ctx context.Context, logger log.Logger, op *Op) (
 			loggerV1.Error(err, "pusher: failed checking receipt", "chunk_address", op.Chunk.Address())
 			return true, err
 		}
-		if err := s.storer.Report(ctx, op.Chunk, storage.ChunkSynced); err != nil {
+		if err := s.storer.Report(ctx, op.Chunk, storage.ChunkSynced, logger); err != nil {
 			loggerV1.Error(err, "pusher: failed to report sync status")
 			return true, err
 		}

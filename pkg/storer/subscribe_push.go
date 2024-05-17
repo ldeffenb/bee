@@ -9,13 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethersphere/bee/v2/pkg/log"
 	"github.com/ethersphere/bee/v2/pkg/storer/internal/upload"
 	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
 
 const subscribePushEventKey = "subscribe-push"
 
-func (db *DB) SubscribePush(ctx context.Context) (<-chan swarm.Chunk, func()) {
+func (db *DB) SubscribePush(ctx context.Context, logger log.Logger) (<-chan swarm.Chunk, func()) {
 	chunks := make(chan swarm.Chunk)
 
 	var (
@@ -35,7 +36,7 @@ func (db *DB) SubscribePush(ctx context.Context) (<-chan swarm.Chunk, func()) {
 		defer close(chunks)
 		for {
 
-			err := upload.IteratePending(ctx, db.storage, func(chunk swarm.Chunk) (bool, error) {
+			err := upload.IteratePending(ctx, db.storage, logger, func(chunk swarm.Chunk) (bool, error) {
 				select {
 				case chunks <- chunk:
 					return false, nil

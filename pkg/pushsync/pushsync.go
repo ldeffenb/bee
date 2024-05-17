@@ -491,6 +491,7 @@ func (ps *PushSync) push(parentCtx context.Context, resultChan chan<- receiptRes
 
 	receipt, err = ps.pushChunkToPeer(tracing.WithContext(ctx, spanInner.Context()), peer, ch)
 	if err != nil {
+		ps.logger.Debug("pushTrace:pushChunkToPeer failed", "chunk", ch.Address(), "peer", peer, "err", err)
 		return
 	}
 
@@ -501,6 +502,7 @@ func (ps *PushSync) push(parentCtx context.Context, resultChan chan<- receiptRes
 
 func (ps *PushSync) pushChunkToPeer(ctx context.Context, peer swarm.Address, ch swarm.Chunk) (receipt *pb.Receipt, err error) {
 
+	ps.logger.Debug("pushTrace:pushChunkToPeer", "chunk", ch.Address(), "peer", peer)
 	streamer, err := ps.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
 	if err != nil {
 		return nil, fmt.Errorf("new stream for peer %s: %w", peer.String(), err)
@@ -528,7 +530,7 @@ func (ps *PushSync) pushChunkToPeer(ctx context.Context, peer swarm.Address, ch 
 		return nil, err
 	}
 
-	err = ps.store.Report(ctx, ch, storage.ChunkSent)
+	err = ps.store.Report(ctx, ch, storage.ChunkSent, ps.logger)
 	if err != nil && !errors.Is(err, storage.ErrNotFound) {
 		err = fmt.Errorf("tag %d increment: %w", ch.TagID(), err)
 		return
