@@ -187,7 +187,17 @@ func (s *Service) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
 func (s *Service) listPinnedRootHashes(w http.ResponseWriter, r *http.Request) {
 	logger := s.logger.WithName("get_pins").Build()
 
-	pinned, err := s.storer.Pins()
+	queries := struct {
+		Offset    int  `map:"offset"`
+		Limit     int  `map:"limit"`
+	}{}
+
+	if response := s.mapStructure(r.URL.Query(), &queries); response != nil {
+		response("invalid query params", logger, w)
+		return
+	}
+
+	pinned, err := s.storer.Pins(queries.Offset, queries.Limit)
 	if err != nil {
 		logger.Debug("list pinned root references: unable to list references", "error", err)
 		logger.Error(nil, "list pinned root references: unable to list references")
