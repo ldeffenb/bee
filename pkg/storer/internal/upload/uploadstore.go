@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ethersphere/bee/v2/pkg/encryption"
@@ -38,6 +39,12 @@ var (
 	// errPushItemUnmarshalInvalidSize is returned when trying
 	// to unmarshal buffer that is not of size pushItemSize.
 	errPushItemUnmarshalInvalidSize = errors.New("unmarshal pushItem: invalid size")
+)
+
+// In memory cache of reference counts by address currently in the pending upload store
+var (
+	counts	map[string]uint32
+	countsMutex sync.RWMutex
 )
 
 // pushItemSize is the size of a marshaled pushItem.
@@ -443,6 +450,12 @@ func (u *uploadPutter) Put(ctx context.Context, st transaction.Store, chunk swar
 	
 	u.logger.Debug("uploadTrace:uploadPutter.Put", "address", pi.Address, "batch", hex.EncodeToString(pi.BatchID))
 
+	if counts != nil {
+		countsMutex.Lock()
+		counts[pi.Address.String()]++
+		countsMutex.Unlock()
+	}
+
 	return errors.Join(
 		st.IndexStore().Put(ui),
 		st.IndexStore().Put(pi),
@@ -525,6 +538,11 @@ func (u *uploadPutter) Cleanup(st transaction.Storage) error {
 			eg.Go(func() error {
 				return st.Run(context.Background(), func(s transaction.Store) error {
 					ui := &uploadItem{Address: item.Address, BatchID: item.BatchID}
+					if counts != nil {
+						countsMutex.Lock()
+						counts[ui.Address.String()]--
+						countsMutex.Unlock()
+					}
 					return errors.Join(
 						s.IndexStore().Delete(ui),
 						s.ChunkStore().Delete(context.Background(), item.Address),
@@ -637,6 +655,12 @@ func Report(ctx context.Context, st transaction.Store, chunk swarm.Chunk, state 
 	}
 
 	logger.Debug("uploadTrace:Report pushItem/chunkstamp Delete", "address", pi.Address, "batch", hex.EncodeToString(pi.BatchID), "state", stateText)
+
+	if counts != nil {
+		countsMutex.Lock()
+		counts[pi.Address.String()]--
+		countsMutex.Unlock()
+	}
 
 	return errors.Join(
 		indexStore.Delete(pi),
@@ -805,6 +829,18 @@ func IterateAllTagItems(st storage.Reader, cb func(ti *TagItem) (bool, error)) e
 	)
 }
 
+func IterateAllPushItems(st storage.Reader, iterateFn func(addr swarm.Address) (bool, error)) error {
+	return st.Iterate(
+		storage.Query{
+			Factory: func() storage.Item { return new(pushItem) },
+		},
+		func(r storage.Result) (bool, error) {
+			address := r.Entry.(*pushItem).Address
+			return iterateFn(address)
+		},
+	)
+}
+
 // BatchIDForChunk returns the first known batchID for the given chunk address.
 func BatchIDForChunk(st storage.Reader, addr swarm.Address) ([]byte, error) {
 	var batchID []byte
@@ -833,3 +869,22 @@ func BatchIDForChunk(st storage.Reader, addr swarm.Address) ([]byte, error) {
 
 	return batchID, nil
 }
+
+func IsPendingUpload(store storage.Reader, address swarm.Address) (uint32, error) {
+	addressString := address.String()
+	if counts != nil {
+		countsMutex.RLock()
+		defer countsMutex.RUnlock()
+		return counts[addressString], nil
+	}
+
+	newCounts := make(map[string]uint32)
+	err := IterateAllPushItems(store, func(address swarm.Address) (bool, error) {
+		newCounts[address.String()]++
+		return false, nil
+	})
+
+	counts = newCounts	// Atomically move the cache into place
+	return counts[addressString], err
+}
+

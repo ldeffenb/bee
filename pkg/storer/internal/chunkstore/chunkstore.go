@@ -51,6 +51,15 @@ func Get(ctx context.Context, r storage.Reader, s storage.Sharky, addr swarm.Add
 	return readChunk(ctx, s, rIdx)
 }
 
+func GetRefCnt(ctx context.Context, r storage.Reader, addr swarm.Address) (uint32, error) {
+	rIdx := &RetrievalIndexItem{Address: addr}
+	err := r.Get(rIdx)
+	if err != nil {
+		return 0, fmt.Errorf("chunk store: failed reading retrievalIndex for address %s: %w", addr, err)
+	}
+	return rIdx.RefCnt, nil
+}
+
 // helper to read chunk from retrievalIndex.
 func readChunk(ctx context.Context, s storage.Sharky, rIdx *RetrievalIndexItem) (swarm.Chunk, error) {
 	buf := make([]byte, rIdx.Location.Length)

@@ -78,6 +78,7 @@ type UploadStore interface {
 	DeleteSession(tagID uint64) error
 	// ListSessions will list all the Sessions currently being tracked.
 	ListSessions(offset, limit int) ([]SessionInfo, error)
+	IsPendingUpload(swarm.Address) (uint32, error)
 }
 
 // PinStore is a logical component of the storer which deals with pinning
@@ -95,6 +96,7 @@ type PinStore interface {
 	// HasPin is a helper which checks if a collection exists with the root
 	// reference passed in.
 	HasPin(swarm.Address) (bool, error)
+	IteratePinCollection(swarm.Address, func(swarm.Address) (bool, error)) (error)
 }
 
 // PinIterator is a helper interface which can be used to iterate over all the
@@ -114,6 +116,7 @@ type CacheStore interface {
 	// This will add the chunk to underlying store as well as new indexes which
 	// will keep track of the chunk in the cache.
 	Cache() storage.Putter
+	IsCached(swarm.Address) (bool, error)
 }
 
 // NetStore is a logical component of the storer that deals with network. It will
@@ -140,6 +143,7 @@ type Reserve interface {
 	EvictBatch(ctx context.Context, batchID []byte) error
 	ReserveSample(context.Context, []byte, uint8, uint64, *big.Int) (Sample, error)
 	ReserveSize() int
+	IsReserved(swarm.Address) (uint32, error)
 }
 
 // ReserveIterator is a helper interface which can be used to iterate over all

@@ -175,3 +175,7 @@ func (db *DB) ListSessions(offset, limit int) ([]SessionInfo, error) {
 
 	return tags[min(offset, len(tags)):min(offset+limit, len(tags))], nil
 }
+
+func (db *DB) IsPendingUpload(address swarm.Address) (uint32, error) {
+	return upload.IsPendingUpload(db.storage.IndexStore(), address)
+}

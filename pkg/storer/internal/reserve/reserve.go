@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,6 +40,9 @@ type Reserve struct {
 
 	multx *multex.Multex
 	st    transaction.Storage
+
+	counts	map[string]uint32
+	countsMutex sync.RWMutex
 }
 
 func New(
@@ -196,6 +200,49 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 func (r *Reserve) Has(addr swarm.Address, batchID []byte) (bool, error) {
 	item := &BatchRadiusItem{Bin: swarm.Proximity(r.baseAddr.Bytes(), addr.Bytes()), BatchID: batchID, Address: addr}
 	return r.st.IndexStore().Has(item)
+}
+
+func (r *Reserve) IsReserved(addr swarm.Address) (uint32, error) {
+	addrString := addr.String()
+	if r.counts != nil {
+		r.countsMutex.RLock()
+		defer r.countsMutex.RUnlock()
+		return r.counts[addrString], nil
+	}
+	r.logger.Info("Building reserve shadow counts")
+	start := time.Now()
+	counts := make(map[string]uint32)
+	multiStampCount := 0
+
+	err := r.IterateReserve(func(bri *BatchRadiusItem) (bool, error) {
+		counts[bri.Address.String()]++
+		if counts[bri.Address.String()] > 1 {
+			multiStampCount++
+			//r.logger.Debug("shadow reserve > 1", "address", bri.Address, "count", counts[bri.Address.String()])
+		}
+		return false, nil
+	})
+	r.counts = counts
+	r.logger.Info("Built reserve shadow counts", "count", len(counts), "multiStamp", multiStampCount, "elapsed", time.Since(start).Round(time.Millisecond))
+	r.countsMutex.RLock()
+	defer r.countsMutex.RUnlock()
+	return r.counts[addrString], err
+}
+
+func (r *Reserve) IterateReserve(cb func(*BatchRadiusItem) (bool, error)) error {
+	err := r.st.IndexStore().Iterate(storage.Query{
+		Factory:       func() storage.Item { return &BatchRadiusItem{} },
+	}, func(res storage.Result) (bool, error) {
+		item := res.Entry.(*BatchRadiusItem)
+
+		stop, err := cb(item)
+		if stop || err != nil {
+			return true, err
+		}
+		return false, nil
+	})
+
+	return err
 }
 
 func (r *Reserve) Get(ctx context.Context, addr swarm.Address, batchID []byte) (swarm.Chunk, error) {
