@@ -536,13 +536,16 @@ func (s *Service) downloadHandler(logger log.Logger, w http.ResponseWriter, r *h
 	}
 
 	s.logger.Debug("downloadHandler", "reference", reference, "Strategy", headers.Strategy, "Fallback", headers.FallbackMode)
-
 	ctx := r.Context()
 	ctx, err := getter.SetConfigInContext(ctx, headers.Strategy, headers.FallbackMode, headers.ChunkRetrievalTimeout, logger)
 	if err != nil {
 		logger.Error(err, err.Error())
 		jsonhttp.BadRequest(w, "could not parse headers")
 		return
+	}
+	if headers.Strategy != nil && *headers.Strategy == int(getter.NONE) {
+		ctx = redundancy.SetLevelInContext(ctx, redundancy.NONE)
+		s.logger.Debug("downloadHandler: set redundancy.NONE", "reference", reference, "rLevel", redundancy.GetLevelFromContext(ctx), "NONE", redundancy.NONE)
 	}
 
 	reader, l, err := joiner.New(ctx, s.storer.Download(cache), s.storer.Cache(), reference, s.logger)

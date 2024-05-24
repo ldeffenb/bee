@@ -121,14 +121,15 @@ func (g *getter) Get(ctx context.Context, addr swarm.Address) (ch swarm.Chunk, e
 
 			g.wg.Add(1)
 			go func() {
+				address := swarm.NewAddress(so.addr)
 				if g.logger != nil {
-					g.logger.Debug("replicas.getter.Get: so<-next", "addr", so.addr)
+					g.logger.Debug("replicas.getter.Get: so<-next", "addr", address)
 				}
 				defer g.wg.Done()
-				ch, err := g.Getter.Get(ctx, swarm.NewAddress(so.addr))
+				ch, err := g.Getter.Get(ctx, address)
 				if err != nil {
 					if g.logger != nil {
-						g.logger.Debug("replicas.getter.Get: so<-next", "addr", so.addr, "err", err)
+						g.logger.Debug("replicas.getter.Get: so<-next", "addr", address, "err", err)
 					}
 					errc <- err
 					return
