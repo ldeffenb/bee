@@ -67,6 +67,7 @@ func New(addrs []swarm.Address, shardCnt int, g storage.Getter, p storage.Putter
 		config:       conf,
 		logger:       conf.Logger.WithName("redundancy").Build(),
 	}
+	log.SetVerbosity(d.logger, log.VerbosityDebug)
 
 	// after init, cache and wait channels are immutable, need no locking
 	for i := 0; i < shardCnt; i++ {
@@ -143,9 +144,11 @@ func (g *decoder) fetch(ctx context.Context, i int, waitForRecovery bool) (err e
 			}()
 		}
 
+g.logger.Debug("redundancyGetter:Get", "i", i, "address", g.addrs[i])
 		// retrieval
 		ch, err := g.fetcher.Get(fctx, g.addrs[i])
 		if err != nil {
+g.logger.Debug("redundancyGetter:Get", "i", i, "address", g.addrs[i], "err", err)
 			g.failedCnt.Add(1)
 			close(g.waits[i])
 			return waitRecovery(err)

@@ -535,6 +535,8 @@ func (s *Service) downloadHandler(logger log.Logger, w http.ResponseWriter, r *h
 		cache = *headers.Cache
 	}
 
+	s.logger.Debug("downloadHandler", "reference", reference, "Strategy", headers.Strategy, "Fallback", headers.FallbackMode)
+
 	ctx := r.Context()
 	ctx, err := getter.SetConfigInContext(ctx, headers.Strategy, headers.FallbackMode, headers.ChunkRetrievalTimeout, logger)
 	if err != nil {
