@@ -545,7 +545,7 @@ func (s *Service) downloadHandler(logger log.Logger, w http.ResponseWriter, r *h
 		return
 	}
 
-	reader, l, err := joiner.New(ctx, s.storer.Download(cache), s.storer.Cache(), reference)
+	reader, l, err := joiner.New(ctx, s.storer.Download(cache), s.storer.Cache(), reference, s.logger)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, topology.ErrNotFound) {
 			logger.Debug("api download: not found ", "address", reference, "error", err)

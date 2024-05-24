@@ -18,6 +18,7 @@ import (
 	"github.com/ethersphere/bee/v2/pkg/file"
 	"github.com/ethersphere/bee/v2/pkg/file/redundancy"
 	"github.com/ethersphere/bee/v2/pkg/file/redundancy/getter"
+	"github.com/ethersphere/bee/v2/pkg/log"
 	"github.com/ethersphere/bee/v2/pkg/replicas"
 	storage "github.com/ethersphere/bee/v2/pkg/storage"
 	"github.com/ethersphere/bee/v2/pkg/swarm"
@@ -104,12 +105,15 @@ func (g *decoderCache) GetOrCreate(addrs []swarm.Address, shardCnt int) storage.
 }
 
 // New creates a new Joiner. A Joiner provides Read, Seek and Size functionalities.
-func New(ctx context.Context, g storage.Getter, putter storage.Putter, address swarm.Address) (file.Joiner, int64, error) {
+func New(ctx context.Context, g storage.Getter, putter storage.Putter, address swarm.Address, logger log.Logger) (file.Joiner, int64, error) {
 	// retrieve the root chunk to read the total data length the be retrieved
 	rLevel := redundancy.GetLevelFromContext(ctx)
+	if logger != nil {
+		logger.Debug("joiner.New", "address", address, "rLevel", rLevel)
+	}
 	rootChunkGetter := store.New(g)
 	if rLevel != redundancy.NONE {
-		rootChunkGetter = store.New(replicas.NewGetter(g, rLevel))
+		rootChunkGetter = store.New(replicas.NewGetter(g, rLevel, logger))
 	}
 	rootChunk, err := rootChunkGetter.Get(ctx, address)
 	if err != nil {

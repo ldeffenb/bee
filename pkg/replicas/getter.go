@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ethersphere/bee/v2/pkg/file/redundancy"
+	"github.com/ethersphere/bee/v2/pkg/log"
 	"github.com/ethersphere/bee/v2/pkg/soc"
 	"github.com/ethersphere/bee/v2/pkg/storage"
 	"github.com/ethersphere/bee/v2/pkg/swarm"
@@ -39,11 +40,12 @@ type getter struct {
 	wg sync.WaitGroup
 	storage.Getter
 	level redundancy.Level
+	logger log.Logger
 }
 
 // NewGetter is the getter constructor
-func NewGetter(g storage.Getter, level redundancy.Level) storage.Getter {
-	return &getter{Getter: g, level: level}
+func NewGetter(g storage.Getter, level redundancy.Level, logger log.Logger) storage.Getter {
+	return &getter{Getter: g, level: level, logger: logger}
 }
 
 // Get makes the getter satisfy the storage.Getter interface
@@ -119,9 +121,15 @@ func (g *getter) Get(ctx context.Context, addr swarm.Address) (ch swarm.Chunk, e
 
 			g.wg.Add(1)
 			go func() {
+				if g.logger != nil {
+					g.logger.Debug("replicas.getter.Get: so<-next", "addr", so.addr)
+				}
 				defer g.wg.Done()
 				ch, err := g.Getter.Get(ctx, swarm.NewAddress(so.addr))
 				if err != nil {
+					if g.logger != nil {
+						g.logger.Debug("replicas.getter.Get: so<-next", "addr", so.addr, "err", err)
+					}
 					errc <- err
 					return
 				}

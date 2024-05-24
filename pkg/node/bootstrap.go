@@ -229,7 +229,7 @@ func bootstrapNode(
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
-		reader, l, err = joiner.New(ctx, localStore.Download(true), localStore.Cache(), snapshotReference)
+		reader, l, err = joiner.New(ctx, localStore.Download(true), localStore.Cache(), snapshotReference, nil)
 		if err != nil {
 			logger.Warning("bootstrap: file joiner failed", "error", err)
 			continue

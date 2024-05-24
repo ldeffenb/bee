@@ -49,7 +49,7 @@ func NewReadonly(getter storage.Getter) file.LoadSaver {
 }
 
 func (ls *loadSave) Load(ctx context.Context, ref []byte) ([]byte, error) {
-	j, _, err := joiner.New(ctx, ls.getter, ls.putter, swarm.NewAddress(ref))
+	j, _, err := joiner.New(ctx, ls.getter, ls.putter, swarm.NewAddress(ref), nil)
 	if err != nil {
 		return nil, err
 	}

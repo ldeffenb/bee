@@ -42,7 +42,7 @@ type service struct {
 // Traverse implements Traverser.Traverse method.
 func (s *service) Traverse(ctx context.Context, addr swarm.Address, traverseManifests bool, iterFn swarm.AddressIterFunc) error {
 	processBytes := func(ref swarm.Address) error {
-		j, _, err := joiner.New(ctx, s.getter, s.putter, ref)
+		j, _, err := joiner.New(ctx, s.getter, s.putter, ref, nil)
 		if err != nil {
 			return fmt.Errorf("traversal: joiner error on %q: %w", ref, err)
 		}
