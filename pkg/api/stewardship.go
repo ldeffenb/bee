@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/ethersphere/bee/v2/pkg/file/redundancy"
 	"github.com/ethersphere/bee/v2/pkg/postage"
 	"github.com/ethersphere/bee/v2/pkg/steward"
 	storage "github.com/ethersphere/bee/v2/pkg/storage"
@@ -131,7 +132,10 @@ func (s *Service) stewardshipTrackHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	res, chunks, err := s.steward.Track(r.Context(), paths.Address)
+	s.logger.Debug("stewardship track: force redundancy.NONE", "chunk_address", paths.Address)
+	ctx := redundancy.SetLevelInContext(r.Context(), redundancy.NONE)
+
+	res, chunks, err := s.steward.Track(ctx, paths.Address)
 	if err != nil {
 		s.logger.Debug("stewardship track: failed", "chunk_address", paths.Address, "error", err)
 		s.logger.Error(nil, "stewardship track: failed")
