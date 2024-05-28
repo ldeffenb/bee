@@ -340,7 +340,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 	resultChan := make(chan receiptResult)
 
-	retryC := make(chan struct{}, max(1,parallelForwards))	// Need room for at least one!
+	retryC := make(chan struct{}, max(1, parallelForwards))
 
 	retry := func(why string) {
 		ps.logger.Debug("pushTrace:pushToClosest:retry", "chunk", ch.Address(), "why", why)
