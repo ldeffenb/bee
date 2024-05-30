@@ -532,9 +532,10 @@ func (s *Service) mountBusinessDebug() {
 		s.postageSyncStatusCheckHandler,
 		web.FinalHandler(jsonhttp.MethodHandler{
 			"GET": http.HandlerFunc(s.postageGetStampBucketsHandler),
+			"DELETE": http.HandlerFunc(s.postageResetStampBucketsHandler),
 		})),
 	)
-
+	
 	handle("/stamps/{amount}/{depth}", web.ChainHandlers(
 		s.postageAccessHandler,
 		s.postageSyncStatusCheckHandler,

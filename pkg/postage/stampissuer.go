@@ -260,6 +260,20 @@ func (si *StampIssuer) ImmutableFlag() bool {
 	return si.data.ImmutableFlag
 }
 
+func (si *StampIssuer) ResetBuckets() []uint32 {
+	si.mtx.Lock()
+	defer si.mtx.Unlock()
+
+	for i, _ := range si.data.Buckets {
+		si.data.Buckets[i] = 0
+	}
+	si.data.MaxBucketCount = 0
+
+	b := make([]uint32, len(si.data.Buckets))
+	copy(b, si.data.Buckets)
+	return b
+}
+
 func (si *StampIssuer) Buckets() []uint32 {
 	si.mtx.Lock()
 	defer si.mtx.Unlock()

@@ -58,6 +58,10 @@ func (m *mockPostage) HandleStampExpiry(ctx context.Context, id []byte) error {
 	return nil
 }
 
+func (m *mockPostage) RemoveStampItems(ctx context.Context, id []byte) error {
+	return nil
+}
+
 func (m *mockPostage) Add(s *postage.StampIssuer) error {
 	m.issuerLock.Lock()
 	defer m.issuerLock.Unlock()

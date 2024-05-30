@@ -39,6 +39,7 @@ type Service interface {
 	Add(*StampIssuer) error
 	StampIssuers() []*StampIssuer
 	GetStampIssuer([]byte) (*StampIssuer, func() error, error)
+	RemoveStampItems(context.Context, []byte) error
 	IssuerUsable(*StampIssuer) bool
 	BatchEventListener
 	BatchExpiryHandler
@@ -204,14 +205,14 @@ func (ps *service) HandleStampExpiry(ctx context.Context, id []byte) error {
 	}
 
 	if exists {
-		return ps.removeStampItems(ctx, id)
+		return ps.RemoveStampItems(ctx, id)
 	}
 
 	return nil
 }
 
 // removeStampItems
-func (ps *service) removeStampItems(ctx context.Context, batchID []byte) error {
+func (ps *service) RemoveStampItems(ctx context.Context, batchID []byte) error {
 
 	ps.logger.Debug("removing expired stamp items", "batchID", hex.EncodeToString(batchID))
 

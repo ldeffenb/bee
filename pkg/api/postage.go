@@ -296,6 +296,64 @@ func (s *Service) postageGetStampBucketsHandler(w http.ResponseWriter, r *http.R
 	jsonhttp.OK(w, resp)
 }
 
+func (s *Service) postageResetStampBucketsHandler(w http.ResponseWriter, r *http.Request) {
+	logger := s.logger.WithName("reset_stamp_bucket").Build()
+
+	paths := struct {
+		BatchID []byte `map:"batch_id" validate:"required,len=32"`
+	}{}
+	if response := s.mapStructure(mux.Vars(r), &paths); response != nil {
+		response("invalid path params", logger, w)
+		return
+	}
+	hexBatchID := hex.EncodeToString(paths.BatchID)
+
+	issuer, save, err := s.post.GetStampIssuer(paths.BatchID)
+	if err != nil {
+		logger.Debug("reset stamp issuer: get issuer failed", "batch_id", hexBatchID, "error", err)
+		logger.Error(nil, "reset stamp issuer: get issuer failed")
+		switch {
+		case errors.Is(err, postage.ErrNotUsable):
+			jsonhttp.BadRequest(w, "batch not usable")
+		case errors.Is(err, postage.ErrNotFound):
+			jsonhttp.NotFound(w, "issuer does not exist")
+		default:
+			jsonhttp.InternalServerError(w, "get issuer failed")
+		}
+		return
+	}
+
+	b := issuer.ResetBuckets()
+	err = save()
+	if err != nil {
+		logger.Debug("reset stamp issuer: save failed", "batch_id", hexBatchID, "error", err)
+		logger.Error(nil, "reset stamp issuer: save failed")
+		jsonhttp.InternalServerError(w, "reset issuer failed")
+		return
+	}
+	
+	err = s.post.RemoveStampItems(r.Context(), paths.BatchID)
+	if err != nil {
+		logger.Debug("reset stamp issuer: remove items failed", "batch_id", hexBatchID, "error", err)
+		logger.Error(nil, "reset stamp issuer: remove items failed")
+		jsonhttp.InternalServerError(w, "remove items failed")
+		return
+	}
+	
+	resp := postageStampBucketsResponse{
+		Depth:            issuer.Depth(),
+		BucketDepth:      issuer.BucketDepth(),
+		BucketUpperBound: issuer.BucketUpperBound(),
+		Buckets:          make([]bucketData, len(b)),
+	}
+
+	for i, v := range b {
+		resp.Buckets[i] = bucketData{BucketID: uint32(i), Collisions: v}
+	}
+
+	jsonhttp.OK(w, resp)
+}
+
 func (s *Service) postageGetStampHandler(w http.ResponseWriter, r *http.Request) {
 	logger := s.logger.WithName("get_stamp").Build()
 
