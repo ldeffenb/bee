@@ -156,7 +156,7 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 		phaseEvents.Publish(sample)
 
 		round, _ := a.state.currentRoundAndPhase()
-		logErr(claim, round, a.handleClaim(ctx, round))
+		logErr(claim, round, a.handleClaim(ctx, round, blockTime, blocksPerRound, blocksPerPhase))
 	})
 
 	phaseEvents.On(sample, func(ctx context.Context) {
@@ -315,7 +315,7 @@ func (a *Agent) handleReveal(ctx context.Context, round uint64) error {
 	return nil
 }
 
-func (a *Agent) handleClaim(ctx context.Context, round uint64) error {
+func (a *Agent) handleClaim(ctx context.Context, round uint64, blockTime time.Duration, blocksPerRound, blocksPerPhase uint64) error {
 	hasRevealed := a.state.HasRevealed(round)
 	if !hasRevealed {
 		// When there was no reveal in same round, phase is skipped
@@ -334,6 +334,42 @@ func (a *Agent) handleClaim(ctx context.Context, round uint64) error {
 		a.logger.Info("not a winner")
 		// When there is nothing to claim (node is not a winner), phase is played
 		return nil
+	}
+	
+/*
+	Delay until close to the end of the claim phase to maximize return
+*/
+	a.logger.Info("delaying claim to maximize return")
+DelayLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err() //ctx.Cause()
+		case <-time.After(blockTime):
+			a.metrics.BackendCalls.Inc()
+			block, err := a.backend.BlockNumber(ctx)
+			if err != nil {
+				a.metrics.BackendErrors.Inc()
+				a.logger.Error(err, "getting block number")
+				break DelayLoop
+			}
+			var currentPhase PhaseType
+			p := block % blocksPerRound
+			if p < blocksPerPhase {
+				currentPhase = commit // [0, 37]
+			} else if p >= blocksPerPhase && p < 2*blocksPerPhase { // [38, 75]
+				currentPhase = reveal
+			} else if p >= 2*blocksPerPhase {
+				currentPhase = claim // [76, 151]
+			}
+			if currentPhase != claim {
+				a.logger.Warning("missed claim", "round", round, "block", block)
+				return fmt.Errorf("missed claim")
+			}
+			if p >= blocksPerRound - 5 {	// 3 almost didn't process in time!
+				break DelayLoop
+			}
+		}
 	}
 
 	a.state.SetLastWonRound(round)
