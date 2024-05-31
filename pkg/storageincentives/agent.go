@@ -336,6 +336,15 @@ func (a *Agent) handleClaim(ctx context.Context, round uint64, blockTime time.Du
 		return nil
 	}
 	
+	// In case when there are too many expired batches, Claim trx could runs out of gas.
+	// To prevent this, node should first expire batches before Claiming a reward.
+	err = a.batchExpirer.ExpireBatches(ctx)
+	if err != nil {
+		a.logger.Info("expire batches failed", "err", err)
+		// Even when error happens, proceed with claim handler
+		// because this should not prevent node from claiming a reward
+	}
+
 /*
 	Delay until close to the end of the claim phase to maximize return
 */
