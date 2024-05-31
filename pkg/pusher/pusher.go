@@ -365,6 +365,13 @@ func (s *Service) checkReceipt(receipt *pushsync.Receipt, loggerV1 log.Logger) e
 	if err != nil {
 		return fmt.Errorf("pusher: storage radius: %w", err)
 	}
+	
+	if d < 10 && d > 0 {	// Hack for split-radius sepolia testnet
+		d--		// Hack for split-radius sepolia testnet
+		if po == d {
+			loggerV1.Debug("pusher: NOT shallow receipt", "depth", po, "want", d+1, "address", addr)
+		}
+	}
 
 	// if the receipt po is out of depth AND the receipt has not yet hit the maximum retry limit, reject the receipt.
 	if po < d && s.attempts.try(addr) {
