@@ -348,7 +348,14 @@ func (a *Agent) handleClaim(ctx context.Context, round uint64, blockTime time.Du
 /*
 	Delay until close to the end of the claim phase to maximize return
 */
-	a.logger.Info("delaying claim to maximize return")
+	block, err := a.backend.BlockNumber(ctx)
+	if err != nil {
+		a.metrics.BackendErrors.Inc()
+		a.logger.Error(err, "getting block number")
+		block = 0
+	}
+	target := round * blocksPerRound + blocksPerRound - 7	// 5 was on last block, 3 didn't process in time!
+	a.logger.Info("delaying claim to maximize return", "round", round, "block", block, "target", target)
 DelayLoop:
 	for {
 		select {
@@ -375,9 +382,10 @@ DelayLoop:
 				a.logger.Warning("missed claim", "round", round, "block", block)
 				return fmt.Errorf("missed claim")
 			}
-			if p >= blocksPerRound - 5 {	// 3 almost didn't process in time!
+			if block >= target {
 				break DelayLoop
 			}
+			a.logger.Debug("delaying claim to maximize return", "round", round, "block", block, "target", target)
 		}
 	}
 
