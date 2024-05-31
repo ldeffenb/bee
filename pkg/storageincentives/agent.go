@@ -336,6 +336,9 @@ func (a *Agent) handleClaim(ctx context.Context, round uint64, blockTime time.Du
 		return nil
 	}
 	
+	a.state.SetLastWonRound(round)
+	a.metrics.Winner.Inc()
+
 	// In case when there are too many expired batches, Claim trx could runs out of gas.
 	// To prevent this, node should first expire batches before Claiming a reward.
 	err = a.batchExpirer.ExpireBatches(ctx)
@@ -344,6 +347,28 @@ func (a *Agent) handleClaim(ctx context.Context, round uint64, blockTime time.Du
 		// Even when error happens, proceed with claim handler
 		// because this should not prevent node from claiming a reward
 	}
+
+	errBalance := a.state.SetBalance(ctx)
+	if errBalance != nil {
+		a.logger.Info("could not set balance", "err", err)
+	}
+
+	sampleData, exists := a.state.SampleData(round - 1)
+	if !exists {
+		return fmt.Errorf("sample not found")
+	}
+
+	anchor2, err := a.contract.ReserveSalt(ctx)
+	if err != nil {
+		a.logger.Info("failed getting anchor after second reveal", "err", err)
+	}
+
+	now := time.Now()
+	proofs, err := makeInclusionProofs(sampleData.ReserveSampleItems, sampleData.Anchor1, anchor2)
+	if err != nil {
+		return fmt.Errorf("making inclusion proofs: %w", err)
+	}
+	dur := time.Since(now)
 
 /*
 	Delay until close to the end of the claim phase to maximize return
@@ -355,7 +380,7 @@ func (a *Agent) handleClaim(ctx context.Context, round uint64, blockTime time.Du
 		block = 0
 	}
 	target := round * blocksPerRound + blocksPerRound - 7	// 5 was on last block, 3 didn't process in time!
-	a.logger.Info("delaying claim to maximize return", "round", round, "block", block, "target", target)
+	a.logger.Info("delaying claim to maximize return", "round", round, "block", block, "target", target, "proofs_duration", dur)
 DelayLoop:
 	for {
 		select {
@@ -389,9 +414,6 @@ DelayLoop:
 		}
 	}
 
-	a.state.SetLastWonRound(round)
-	a.metrics.Winner.Inc()
-
 	// In case when there are too many expired batches, Claim trx could runs out of gas.
 	// To prevent this, node should first expire batches before Claiming a reward.
 	err = a.batchExpirer.ExpireBatches(ctx)
@@ -399,26 +421,6 @@ DelayLoop:
 		a.logger.Info("expire batches failed", "err", err)
 		// Even when error happens, proceed with claim handler
 		// because this should not prevent node from claiming a reward
-	}
-
-	errBalance := a.state.SetBalance(ctx)
-	if errBalance != nil {
-		a.logger.Info("could not set balance", "err", err)
-	}
-
-	sampleData, exists := a.state.SampleData(round - 1)
-	if !exists {
-		return fmt.Errorf("sample not found")
-	}
-
-	anchor2, err := a.contract.ReserveSalt(ctx)
-	if err != nil {
-		a.logger.Info("failed getting anchor after second reveal", "err", err)
-	}
-
-	proofs, err := makeInclusionProofs(sampleData.ReserveSampleItems, sampleData.Anchor1, anchor2)
-	if err != nil {
-		return fmt.Errorf("making inclusion proofs: %w", err)
 	}
 
 	txHash, err := a.contract.Claim(ctx, proofs)
