@@ -113,6 +113,7 @@ func (s *Service) peerCursorsHandler(w http.ResponseWriter, r *http.Request) {
 
 type peerSyncBatchResponse struct {
 	Topmost uint64 `json:"topmost"`
+	Offered int `json:"offered"`
 	Count int `json:"count"`
 	Chunks []Chunk `json:"chunks"`
 	BadChunks []Chunk `json:"badchunks"`
@@ -137,7 +138,7 @@ func (s *Service) peerSyncBatchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	topmost, count, chunks, badchunks, err := s.pullsync.SyncBatch(r.Context(), paths.Address, paths.Bin, paths.Start)
+	topmost, offered, chunks, badchunks, err := s.pullsync.SyncBatch(r.Context(), paths.Address, paths.Bin, paths.Start)
 	if err != nil {
 		logger.Debug("pullsync SyncBatch failed", "peer_address", paths.Address, "error", err)
 		if errors.Is(err, p2p.ErrPeerNotFound) {
@@ -151,7 +152,8 @@ func (s *Service) peerSyncBatchHandler(w http.ResponseWriter, r *http.Request) {
 
 	jsonhttp.OK(w, peerSyncBatchResponse{
 		Topmost: topmost,
-		Count: count,
+		Offered: offered,
+		Count: len(chunks),
 		Chunks: mapChunks(chunks),
 		BadChunks: mapChunks(badchunks),
 	})

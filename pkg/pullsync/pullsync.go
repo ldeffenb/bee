@@ -59,7 +59,7 @@ type Interface interface {
 	Sync(ctx context.Context, peer swarm.Address, bin uint8, start uint64) (topmost uint64, count int, err error)
 	// SyncBatch scans the remote peer bin for chunks owned by a specific batch.
 	// Eventually, the chunks will be returned to the caller for disposition.
-	SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, start uint64) (topmost uint64, count int, chunks []swarm.Chunk, badChunks []swarm.Chunk, err error)
+	SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, start uint64) (topmost uint64, offered int, chunks []swarm.Chunk, badChunks []swarm.Chunk, err error)
 	// GetCursors retrieves all cursors from a downstream peer.
 	GetCursors(ctx context.Context, peer swarm.Address) ([]uint64, uint64, error)
 }
@@ -435,7 +435,7 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 		}
 	}
 
-	return topmost, chunksPut, chunksToPut, badChunks, chunkErr
+	return topmost, len(offer.Chunks), chunksToPut, badChunks, chunkErr
 }
 
 // handler handles an incoming request to sync an interval
