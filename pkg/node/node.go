@@ -1099,6 +1099,7 @@ func NewBee(
 		SyncStatus:      syncStatusFn,
 		NodeStatus:      nodeStatus,
 		PinIntegrity:    localStore.PinIntegrity(),
+		PullSync:        pullSyncProtocol,
 	}
 
 	if o.APIAddr != "" {
