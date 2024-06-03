@@ -5,10 +5,13 @@
 package postage
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ethersphere/bee/v2/pkg/crypto"
+	"github.com/ethersphere/bee/v2/pkg/log"
 	"github.com/ethersphere/bee/v2/pkg/storage"
 	"github.com/ethersphere/bee/v2/pkg/swarm"
 )
@@ -29,11 +32,12 @@ type stamper struct {
 	store  storage.Store
 	issuer *StampIssuer
 	signer crypto.Signer
+	logger log.Logger
 }
 
 // NewStamper constructs a Stamper.
-func NewStamper(store storage.Store, issuer *StampIssuer, signer crypto.Signer) Stamper {
-	return &stamper{store, issuer, signer}
+func NewStamper(store storage.Store, issuer *StampIssuer, signer crypto.Signer, logger log.Logger) Stamper {
+	return &stamper{store, issuer, signer, logger}
 }
 
 // Stamp takes chunk, see if the chunk can be included in the batch and
@@ -42,25 +46,38 @@ func (st *stamper) Stamp(addr swarm.Address) (*Stamp, error) {
 	st.issuer.mtx.Lock()
 	defer st.issuer.mtx.Unlock()
 
+	tfmt := "2006-01-02T15:04:05"
+	
 	item := &StampItem{
 		BatchID:      st.issuer.data.BatchID,
 		chunkAddress: addr,
 	}
 	switch err := st.store.Get(item); {
 	case err == nil:
+		bucket, index := BucketIndexFromBytes(item.BatchIndex)
+		original := item.BatchTimestamp
 		item.BatchTimestamp = unixTime()
+		st.logger.Debug("stampTrace: update time", "addr", addr, "batch", hex.EncodeToString(item.BatchID), "bucket", bucket, "index", index,
+						"from", time.Unix(0,int64(TimestampFromBytes(original))).Format(tfmt), "to", time.Unix(0,int64(TimestampFromBytes(item.BatchTimestamp))).Format(tfmt))
 		if err = st.store.Put(item); err != nil {
+			st.logger.Error(err, "stampTrace: update time put err", "addr", addr, "batch", hex.EncodeToString(item.BatchID), "bucket", bucket, "index", index)
 			return nil, err
 		}
 	case errors.Is(err, storage.ErrNotFound):
 		item.BatchIndex, item.BatchTimestamp, err = st.issuer.increment(addr)
+		bucket, index := BucketIndexFromBytes(item.BatchIndex)
+		st.logger.Debug("stampTrace: new stamp", "addr", addr, "batch", hex.EncodeToString(item.BatchID), "bucket", bucket, "index", index,
+						"time", time.Unix(0,int64(TimestampFromBytes(item.BatchTimestamp))).Format(tfmt))
 		if err != nil {
+			st.logger.Error(err, "stampTrace: increment err", "addr", addr, "batch", hex.EncodeToString(item.BatchID), "bucket", bucket, "index", index)
 			return nil, err
 		}
 		if err := st.store.Put(item); err != nil {
+			st.logger.Error(err, "stampTrace: put err", "addr", addr, "batch", hex.EncodeToString(item.BatchID), "bucket", bucket, "index", index)
 			return nil, err
 		}
 	default:
+		st.logger.Error(err, "stampTrace: get err", "addr", addr, "batch", hex.EncodeToString(item.BatchID))
 		return nil, fmt.Errorf("get stamp for %s: %w", item, err)
 	}
 

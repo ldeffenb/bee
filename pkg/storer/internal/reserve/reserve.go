@@ -126,6 +126,8 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 	defer r.multx.Unlock(strconv.Itoa(int(bin)))
 
 	return r.st.Run(ctx, func(s transaction.Store) error {
+		
+		tfmt := "2006-01-02T15:04:05"
 
 		oldItem, loadedStamp, err := stampindex.LoadOrStore(s.IndexStore(), reserveNamespace, chunk)
 		if err != nil {
@@ -139,9 +141,9 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 				r.logger.Debug(
 					"NOT replacing chunk stamp index",
 					"old_chunk", oldItem.ChunkAddress,
-					"old_time", time.Unix(0, int64(prev)).UTC(),
+					"old_time", time.Unix(0, int64(prev)).Format(tfmt),
 					"new_chunk", chunk.Address(),
-					"new_time", time.Unix(0, int64(curr)).UTC(),
+					"new_time", time.Unix(0, int64(curr)).Format(tfmt),
 					"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
 				)
 				return fmt.Errorf("overwrite prev %d cur %d batch %s: %w", prev, curr, hex.EncodeToString(chunk.Stamp().BatchID()), storage.ErrOverwriteNewerChunk)
@@ -163,9 +165,9 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 			r.logger.Debug(
 				"replacing chunk stamp index",
 				"old_chunk", oldItem.ChunkAddress,
-				"old_time", time.Unix(0, int64(prev)).UTC(),
+				"old_time", time.Unix(0, int64(prev)).Format(tfmt),
 				"new_chunk", chunk.Address(),
-				"new_time", time.Unix(0, int64(curr)).UTC(),
+				"new_time", time.Unix(0, int64(curr)).Format(tfmt),
 				"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
 			)
 

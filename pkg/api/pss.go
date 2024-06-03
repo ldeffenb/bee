@@ -94,7 +94,7 @@ func (s *Service) pssPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stamper := postage.NewStamper(s.stamperStore, i, s.signer)
+	stamper := postage.NewStamper(s.stamperStore, i, s.signer, s.logger)
 
 	err = s.pss.Send(r.Context(), topic, payload, stamper, queries.Recipient, targets)
 	if err != nil {

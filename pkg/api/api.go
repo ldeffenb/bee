@@ -818,7 +818,7 @@ func (s *Service) getStamper(batchID []byte) (postage.Stamper, func() error, err
 		return nil, nil, errBatchUnusable
 	}
 
-	return postage.NewStamper(s.stamperStore, issuer, s.signer), save, nil
+	return postage.NewStamper(s.stamperStore, issuer, s.signer, s.logger), save, nil
 }
 
 func (s *Service) newStamperPutter(ctx context.Context, opts putterOptions) (storer.PutterSession, error) {
