@@ -548,6 +548,9 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 			st,
 			opts.ReserveCapacity,
 			opts.RadiusSetter,
+			db.metrics.ReserveOverwriteErr,
+			db.metrics.ReserveOverwriteNew,
+			db.metrics.ReserveOverwriteNot,
 			logger,
 		)
 		if err != nil {

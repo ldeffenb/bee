@@ -23,6 +23,7 @@ import (
 	"github.com/ethersphere/bee/v2/pkg/storer/internal/transaction"
 	"github.com/ethersphere/bee/v2/pkg/swarm"
 	"github.com/ethersphere/bee/v2/pkg/topology"
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 	"resenje.org/multex"
 )
@@ -33,6 +34,9 @@ type Reserve struct {
 	baseAddr     swarm.Address
 	radiusSetter topology.SetStorageRadiuser
 	logger       log.Logger
+	overwriteErr prometheus.Counter
+	overwriteNew prometheus.Counter
+	overwriteNot prometheus.Counter
 
 	capacity int
 	size     atomic.Int64
@@ -50,6 +54,9 @@ func New(
 	st transaction.Storage,
 	capacity int,
 	radiusSetter topology.SetStorageRadiuser,
+	overwriteErrCounter prometheus.Counter,
+	overwriteNewCounter prometheus.Counter,
+	overwriteNotCounter prometheus.Counter,
 	logger log.Logger,
 ) (*Reserve, error) {
 
@@ -59,6 +66,9 @@ func New(
 		capacity:     capacity,
 		radiusSetter: radiusSetter,
 		logger:       logger.WithName(reserveNamespace).Register(),
+		overwriteErr: overwriteErrCounter,
+		overwriteNew: overwriteNewCounter,
+		overwriteNot: overwriteNotCounter,
 		multx:        multex.New(),
 	}
 
@@ -125,6 +135,15 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 			prev := binary.BigEndian.Uint64(oldItem.StampTimestamp)
 			curr := binary.BigEndian.Uint64(chunk.Stamp().Timestamp())
 			if prev >= curr {
+				r.overwriteNot.Inc()
+				r.logger.Debug(
+					"NOT replacing chunk stamp index",
+					"old_chunk", oldItem.ChunkAddress,
+					"old_time", time.Unix(0, int64(prev)).UTC(),
+					"new_chunk", chunk.Address(),
+					"new_time", time.Unix(0, int64(curr)).UTC(),
+					"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+				)
 				return fmt.Errorf("overwrite prev %d cur %d batch %s: %w", prev, curr, hex.EncodeToString(chunk.Stamp().BatchID()), storage.ErrOverwriteNewerChunk)
 			}
 			// An older and different chunk with the same batchID and stamp index has been previously
@@ -136,19 +155,24 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 
 			err := r.removeChunk(ctx, s, oldItem.ChunkAddress, chunk.Stamp().BatchID())
 			if err != nil {
+				r.overwriteErr.Inc()
 				return fmt.Errorf("failed removing older chunk %s: %w", oldItem.ChunkAddress, err)
 			}
 
+			r.overwriteNew.Inc()
 			r.logger.Debug(
 				"replacing chunk stamp index",
 				"old_chunk", oldItem.ChunkAddress,
+				"old_time", time.Unix(0, int64(prev)).UTC(),
 				"new_chunk", chunk.Address(),
+				"new_time", time.Unix(0, int64(curr)).UTC(),
 				"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
 			)
 
 			// replace old stamp index.
 			err = stampindex.Store(s.IndexStore(), reserveNamespace, chunk)
 			if err != nil {
+				r.overwriteErr.Inc()
 				return fmt.Errorf("failed updating stamp index: %w", err)
 			}
 		}

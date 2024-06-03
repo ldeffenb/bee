@@ -22,6 +22,9 @@ type metrics struct {
 	ReserveSize             prometheus.Gauge
 	ReserveSizeWithinRadius prometheus.Gauge
 	ReserveCleanup          prometheus.Counter
+	ReserveOverwriteErr     prometheus.Counter
+	ReserveOverwriteNew     prometheus.Counter
+	ReserveOverwriteNot     prometheus.Counter
 	StorageRadius           prometheus.Gauge
 	CacheSize               prometheus.Gauge
 	EvictedChunkCount       prometheus.Counter
@@ -88,6 +91,30 @@ func newMetrics() metrics {
 				Subsystem: subsystem,
 				Name:      "reserve_cleanup",
 				Help:      "Number of cleaned-up expired chunks.",
+			},
+		),
+		ReserveOverwriteErr: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: m.Namespace,
+				Subsystem: subsystem,
+				Name:      "reserve_overwrite_err",
+				Help:      "Number of errors overwriting stamp indices.",
+			},
+		),
+		ReserveOverwriteNew: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: m.Namespace,
+				Subsystem: subsystem,
+				Name:      "reserve_overwrite_new",
+				Help:      "Number of overwritten stamp indices.",
+			},
+		),
+		ReserveOverwriteNot: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: m.Namespace,
+				Subsystem: subsystem,
+				Name:      "reserve_overwrite_not",
+				Help:      "Number of NOT overwritten stamp indices.",
 			},
 		),
 		StorageRadius: prometheus.NewGauge(
