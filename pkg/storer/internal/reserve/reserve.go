@@ -115,9 +115,9 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 	if err != nil {
 		return err
 	}
-	if has {
-		return nil
-	}
+//	if has {
+//		return nil
+//	}
 
 	bin := swarm.Proximity(r.baseAddr.Bytes(), chunk.Address().Bytes())
 
@@ -133,13 +133,22 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 		if err != nil {
 			return fmt.Errorf("load or store stamp index for chunk %v has fail: %w", chunk, err)
 		}
+		curr := binary.BigEndian.Uint64(chunk.Stamp().Timestamp())
 		if loadedStamp {
 			prev := binary.BigEndian.Uint64(oldItem.StampTimestamp)
-			curr := binary.BigEndian.Uint64(chunk.Stamp().Timestamp())
+			if has && chunk.Address().Equal(oldItem.ChunkAddress) && prev == curr {
+				r.logger.Debug(
+					"stampTrace: reserve Has timestamp",
+					"chunk", chunk.Address(),
+					"time", time.Unix(0, int64(curr)).Format(tfmt),
+					"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+				)
+				return nil	// All is up to date
+			}
 			if prev >= curr {
 				r.overwriteNot.Inc()
 				r.logger.Debug(
-					"NOT replacing chunk stamp index",
+					"stampTrace: NOT replacing chunk stamp index",
 					"old_chunk", oldItem.ChunkAddress,
 					"old_time", time.Unix(0, int64(prev)).Format(tfmt),
 					"new_chunk", chunk.Address(),
@@ -163,7 +172,7 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 
 			r.overwriteNew.Inc()
 			r.logger.Debug(
-				"replacing chunk stamp index",
+				"stampTrace: replacing chunk stamp index",
 				"old_chunk", oldItem.ChunkAddress,
 				"old_time", time.Unix(0, int64(prev)).Format(tfmt),
 				"new_chunk", chunk.Address(),
@@ -177,6 +186,21 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 				r.overwriteErr.Inc()
 				return fmt.Errorf("failed updating stamp index: %w", err)
 			}
+		} else if has {
+			r.logger.Warning(
+				"stampTrace: reserve Has but no stamp",
+				"new_chunk", chunk.Address(),
+				"new_time", time.Unix(0, int64(curr)).Format(tfmt),
+				"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+			)
+			return fmt.Errorf("reserve Has %s batch %s NO STAMP", chunk.Address(), hex.EncodeToString(chunk.Stamp().BatchID()))
+		} else {
+			r.logger.Debug(
+				"stampTrace: new reserve chunk",
+				"chunk", chunk.Address(),
+				"time", time.Unix(0, int64(curr)).Format(tfmt),
+				"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+			)
 		}
 
 		err = chunkstamp.Store(s.IndexStore(), reserveNamespace, chunk)
