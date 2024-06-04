@@ -770,6 +770,7 @@ func IteratePending(ctx context.Context, s transaction.ReadOnlyStore, logger log
 			return true, err
 		}
 		if has {
+			logger.Debug("uploadTrace:IteratePending Has(dirtyTag)", "address", pi.Address, "tagID", pi.TagID)
 			return false, nil
 		}
 		chunk, err := s.ChunkStore().Get(ctx, pi.Address)
@@ -780,8 +781,9 @@ func IteratePending(ctx context.Context, s transaction.ReadOnlyStore, logger log
 
 		stamp, err := chunkstamp.LoadWithBatchID(s.IndexStore(), chunkStampNamespace, chunk.Address(), pi.BatchID)
 		if err != nil {
-			logger.Debug("uploadTrace:IteratePending LoadWithBatchID failed", "address", chunk.Address(), "batch", hex.EncodeToString(pi.BatchID), "err", err)
-			return true, err
+			logger.Debug("uploadTrace:IteratePending LoadWithBatchID failed, ignoring", "address", chunk.Address(), "batch", hex.EncodeToString(pi.BatchID), "err", err)
+			return false, nil
+			//return true, err
 		}
 
 		chunk = chunk.
