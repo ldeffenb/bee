@@ -785,9 +785,11 @@ type putterSessionWrapper struct {
 	storer.PutterSession
 	stamper postage.Stamper
 	save    func() error
+	logger log.Logger
 }
 
 func (p *putterSessionWrapper) Put(ctx context.Context, chunk swarm.Chunk) error {
+	p.logger.Debug("putTrace: Put", "chunk", chunk.Address())
 	stamp, err := p.stamper.Stamp(chunk.Address())
 	if err != nil {
 		return err
@@ -796,10 +798,12 @@ func (p *putterSessionWrapper) Put(ctx context.Context, chunk swarm.Chunk) error
 }
 
 func (p *putterSessionWrapper) Done(ref swarm.Address) error {
+	p.logger.Debug("putTrace: Done", "ref", ref)
 	return errors.Join(p.PutterSession.Done(ref), p.save())
 }
 
 func (p *putterSessionWrapper) Cleanup() error {
+	p.logger.Debug("putTrace: Cleanup")
 	return errors.Join(p.PutterSession.Cleanup(), p.save())
 }
 
@@ -846,6 +850,7 @@ func (s *Service) newStamperPutter(ctx context.Context, opts putterOptions) (sto
 		PutterSession: session,
 		stamper:       stamper,
 		save:          save,
+		logger:        s.logger,
 	}, nil
 }
 
