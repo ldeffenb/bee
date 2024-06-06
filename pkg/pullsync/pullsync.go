@@ -329,6 +329,8 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 		return 0, 0, nil, nil, fmt.Errorf("new bitvector: %w", err)
 	}
 
+	badChunks := make([]swarm.Chunk, 0, ctr)
+
 	for i := 0; i < len(offer.Chunks); i++ {
 
 		addr := offer.Chunks[i].Address
@@ -341,19 +343,20 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 		if a.Equal(swarm.ZeroAddress) {
 			// i'd like to have this around to see we don't see any of these in the logs
 			s.logger.Debug("syncer got a zero address hash on offer", "peer_address", peer)
+			badChunks = append(badChunks, swarm.NewChunk(a, []byte("offer:zero")))
 			continue
 		}
 //		s.metrics.Offered.Inc()
 
 		batchString := hex.EncodeToString(batchID)
 		s.logger.Debug("SyncBatch:offered", "address", a, "batch", batchString)
-		if batchString == "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df" {
+//		if batchString == "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df" {
 				s.logger.Debug("SyncBatch:wanted", "address", a, "batch", batchString)
 				wantChunks[a.ByteString()+string(batchID)] = struct{}{}
 				ctr++
 //				s.metrics.Wanted.Inc()
 				bv.Set(i)
-		}
+//		}
 	}
 
 	wantMsg := &pb.Want{BitVector: bv.Bytes()}
@@ -362,7 +365,6 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 	}
 
 	chunksToPut := make([]swarm.Chunk, 0, ctr)
-	badChunks := make([]swarm.Chunk, 0, ctr)
 
 	var chunkErr error
 	for ; ctr > 0; ctr-- {
@@ -375,6 +377,7 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 		if addr.Equal(swarm.ZeroAddress) {
 			s.logger.Debug("received zero address chunk", "peer_address", peer)
 //			s.metrics.ReceivedZeroAddress.Inc()
+			badChunks = append(badChunks, swarm.NewChunk(addr, []byte("received:zero")))
 			continue
 		}
 
@@ -383,12 +386,14 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 		stamp := new(postage.Stamp)
 		if err = stamp.UnmarshalBinary(delivery.Stamp); err != nil {
 			chunkErr = errors.Join(chunkErr, err)
+			badChunks = append(badChunks, swarm.NewChunk(addr, []byte("stamp:unmarshal")))
 			continue
 		}
 
 		if _, ok := wantChunks[addr.ByteString()+string(stamp.BatchID())]; !ok {
 			s.logger.Debug("want chunks", "error", ErrUnsolicitedChunk, "peer_address", peer, "chunk_address", addr)
 			chunkErr = errors.Join(chunkErr, ErrUnsolicitedChunk)
+			badChunks = append(badChunks, swarm.NewChunk(addr, []byte("unsolicited")))
 			continue
 		}
 
@@ -398,6 +403,7 @@ func (s *Syncer) SyncBatch(ctx context.Context, peer swarm.Address, bin uint8, s
 		if err != nil {
 			s.logger.Debug("unverified stamp", "error", err, "peer_address", peer, "chunk_address", newChunk)
 			chunkErr = errors.Join(chunkErr, err)
+			badChunks = append(badChunks, swarm.NewChunk(addr, []byte("unverified")))
 			continue
 		}
 
