@@ -45,6 +45,9 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx = redundancy.SetLevelInContext(ctx, headers.RLevel)
+	s.logger.Debug("putTrace: bytesUploadHandler: SetLevelInContext", "header", headers.RLevel, "GetLevel", redundancy.GetLevelFromContext(ctx))
+
 	var (
 		tag      uint64
 		err      error
@@ -98,6 +101,8 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 		onErr:          putter.Cleanup,
 		logger:         logger,
 	}
+
+	s.logger.Debug("putTrace: bytesUploadHandler", "rlevel", headers.RLevel)
 
 	p := requestPipelineFn(putter, headers.Encrypt, headers.RLevel)
 	address, err := p(ctx, r.Body)
