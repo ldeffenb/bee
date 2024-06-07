@@ -107,6 +107,8 @@ func New(
 // Put stores a new chunk in the reserve and returns if the reserve size should increase.
 func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 
+	tfmt := "2006-01-02T15:04:05"
+
 	// batchID lock, Put vs Eviction
 	r.multx.Lock(string(chunk.Stamp().BatchID()))
 	defer r.multx.Unlock(string(chunk.Stamp().BatchID()))
@@ -127,7 +129,48 @@ func (r *Reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 
 	return r.st.Run(ctx, func(s transaction.Store) error {
 		
-		tfmt := "2006-01-02T15:04:05"
+		if has {
+			curr := binary.BigEndian.Uint64(chunk.Stamp().Timestamp())
+			oldItem, err2 := stampindex.Load(s.IndexStore(), reserveNamespace, chunk)
+			if err2 != nil {
+				r.logger.Debug(
+					"stampTrace: reserve Has SOME chunk, ignoring",
+					"chunk", chunk.Address(),
+					"time", time.Unix(0, int64(curr)).Format(tfmt),
+					"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+					"err2", err2,
+				)
+			} else {
+				prev := binary.BigEndian.Uint64(oldItem.StampTimestamp)
+				if curr == prev {
+					r.logger.Debug(
+						"stampTrace: reserve Has SAME chunk, ignoring",
+						"chunk", chunk.Address(),
+						"time", time.Unix(0, int64(curr)).Format(tfmt),
+						"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+					)
+				} else if curr < prev {
+					r.logger.Debug(
+						"stampTrace: reserve Has NEWER chunk, ignoring",
+						"old_chunk", oldItem.ChunkAddress,
+						"old_time", time.Unix(0, int64(prev)).Format(tfmt),
+						"new_chunk", chunk.Address(),
+						"new_time", time.Unix(0, int64(curr)).Format(tfmt),
+						"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+					)
+				} else {
+					r.logger.Debug(
+						"stampTrace: reserve has OLDER chunk, ignoring",
+						"old_chunk", oldItem.ChunkAddress,
+						"old_time", time.Unix(0, int64(prev)).Format(tfmt),
+						"new_chunk", chunk.Address(),
+						"new_time", time.Unix(0, int64(curr)).Format(tfmt),
+						"batch_id", hex.EncodeToString(chunk.Stamp().BatchID()),
+					)
+				}
+			}
+			return nil
+		}
 
 		oldItem, loadedStamp, err := stampindex.LoadOrStore(s.IndexStore(), reserveNamespace, chunk)
 		if err != nil {
