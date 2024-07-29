@@ -51,7 +51,7 @@ const (
 	defaultBitSuffixLength             = 4 // the number of bits used to create pseudo addresses for balancing, 2^4, 16 addresses
 	defaultLowWaterMark                = 3 // the number of peers in consecutive deepest bins that constitute as nearest neighbours
 	defaultSaturationPeers             = 8
-	defaultOverSaturationPeers         = 200 //20
+	defaultOverSaturationPeers         = 20 //200 //20	// See also PruneFunc invocation
 	defaultBootNodeOverSaturationPeers = 20
 	defaultShortRetry                  = 30 * time.Second
 	defaultTimeToRetry                 = 2 * defaultShortRetry
@@ -243,6 +243,8 @@ func New(
 		staticPeer:        isStaticPeer(opt.StaticNodes),
 		storageRadius:     swarm.MaxPO,
 	}
+
+	logger.Info("pruning if zero", "StaticNodes", len(k.opt.StaticNodes))
 
 	if k.opt.PruneFunc == nil {
 		k.opt.PruneFunc = k.pruneOversaturatedBins
@@ -605,7 +607,9 @@ func (k *Kad) manage() {
 
 			depth := k.neighborhoodDepth()
 
-			//k.opt.PruneFunc(depth)	// We'll keep all inbounds, thank you
+			if (len(k.opt.StaticNodes) == 0) {
+				k.opt.PruneFunc(depth)	// We'll keep all inbounds, thank you
+			}
 
 			loggerV1.Debug("connector finished", "elapsed", time.Since(start), "old_depth", oldDepth, "new_depth", depth)
 
@@ -1086,6 +1090,10 @@ func (k *Kad) Pick(peer p2p.Peer) bool {
 	oversaturated := k.opt.SaturationFunc(po, k.knownPeers, k.connectedPeers, k.opt.FilterFunc(im.Reachability(false)))
 	// pick the peer if we are not oversaturated
 	if !oversaturated {
+		return true
+	}
+	if (len(k.opt.StaticNodes) > 0) {
+		k.logger.Debug("pruning. pick oversaturated", "bin", po, "peer", peer.Address)
 		return true
 	}
 	k.metrics.PickCallsFalse.Inc()

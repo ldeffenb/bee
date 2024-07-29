@@ -278,9 +278,9 @@ func buildBeeNode(ctx context.Context, c *command, cmd *cobra.Command, logger lo
 
 		staticNodes = append(staticNodes, addr)
 	}
-	if len(staticNodes) > 0 && !bootNode {
-		return nil, errors.New("static nodes can only be configured on bootnodes")
-	}
+	//if len(staticNodes) > 0 && !bootNode {
+	//	return nil, errors.New("static nodes can only be configured on bootnodes")
+	//}
 
 	swapEndpoint := c.config.GetString(optionNameSwapEndpoint)
 	blockchainRpcEndpoint := c.config.GetString(optionNameBlockchainRpcEndpoint)
