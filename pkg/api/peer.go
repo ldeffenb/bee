@@ -145,7 +145,7 @@ func (s *Service) peerSyncBatchHandler(w http.ResponseWriter, r *http.Request) {
 			jsonhttp.NotFound(w, "peer not found")
 			return
 		}
-		logger.Error(nil, "pullsync SyncBatch failed", "peer_address", paths.Address)
+		logger.Error(err, "pullsync SyncBatch failed", "peer_address", paths.Address)
 		jsonhttp.InternalServerError(w, err)
 		return
 	}
