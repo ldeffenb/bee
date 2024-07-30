@@ -135,6 +135,10 @@ func newKadOptions(o Options) kadOptions {
 		LowWaterMark:                defaultValInt(o.LowWaterMark, defaultLowWaterMark),
 	}
 
+	if (len(ko.StaticNodes) > 0) {	// We want to maintain LOTS of connections!
+		ko.SaturationPeers = 500
+	}
+
 	if ko.SaturationFunc == nil {
 		ko.SaturationFunc = makeSaturationFunc(ko)
 	}
