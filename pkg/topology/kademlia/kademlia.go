@@ -136,7 +136,7 @@ func newKadOptions(o Options) kadOptions {
 	}
 
 	if (len(ko.StaticNodes) > 0) {	// We want to maintain LOTS of connections!
-		ko.SaturationPeers = 500
+		ko.OverSaturationPeers = 500
 	}
 
 	if ko.SaturationFunc == nil {
@@ -1097,7 +1097,7 @@ func (k *Kad) Pick(peer p2p.Peer) bool {
 		return true
 	}
 	if (len(k.opt.StaticNodes) > 0) {
-		k.logger.Debug("pruning. pick oversaturated", "bin", po, "peer", peer.Address)
+		k.logger.Info("pruning. pick oversaturated", "bin", po, "peer", peer.Address)
 		return true
 	}
 	k.metrics.PickCallsFalse.Inc()
