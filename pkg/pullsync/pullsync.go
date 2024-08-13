@@ -501,6 +501,8 @@ func (s *Syncer) handler(streamCtx context.Context, p p2p.Peer, stream p2p.Strea
 		return nil
 	}
 
+	s.metrics.SentOffered.Add(float64(len(offer.Chunks)))
+
 	var want pb.Want
 	if err := r.ReadMsgWithContext(ctx, &want); err != nil {
 		return fmt.Errorf("read want: %w", err)
@@ -630,6 +632,7 @@ func (s *Syncer) processWant(ctx context.Context, o *pb.Offer, w *pb.Want) ([]sw
 
 	chunks := make([]swarm.Chunk, 0, len(o.Chunks))
 	for i := 0; i < len(o.Chunks); i++ {
+		s.metrics.SentWanted.Inc()
 		if bv.Get(i) {
 			ch := o.Chunks[i]
 			addr := swarm.NewAddress(ch.Address)
