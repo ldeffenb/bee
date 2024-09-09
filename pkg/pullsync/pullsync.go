@@ -188,7 +188,7 @@ func (s *Syncer) Sync(ctx context.Context, peer swarm.Address, bin uint8, start 
 				s.logger.Debug("storage has", "error", err)
 				return 0, 0, err
 			}
-
+			s.logger.Debug("pullsync:Sync:ReserveHas", "peer", peer, "chunk", a, "batch", hex.EncodeToString(batchID), "hash", hex.EncodeToString(stampHash), "have", have)
 			if !have {
 				wantChunks[a.ByteString()+string(batchID)+string(stampHash)] = struct{}{}
 				ctr++
@@ -231,10 +231,11 @@ func (s *Syncer) Sync(ctx context.Context, peer swarm.Address, bin uint8, start 
 			chunkErr = errors.Join(chunkErr, err)
 			continue
 		}
+		s.logger.Debug("pullsync:Sync:Delivery", "peer", peer, "chunk", addr, "batch", hex.EncodeToString(stamp.BatchID()), "hash", hex.EncodeToString(stampHash))
 
 		wantChunkID := addr.ByteString() + string(stamp.BatchID()) + string(stampHash)
 		if _, ok := wantChunks[wantChunkID]; !ok {
-			s.logger.Debug("want chunks", "error", ErrUnsolicitedChunk, "peer_address", peer, "chunk_address", addr)
+			s.logger.Debug("pullsync:Sync:wantChunks", "error", ErrUnsolicitedChunk, "peer_address", peer, "chunk_address", addr)
 			chunkErr = errors.Join(chunkErr, ErrUnsolicitedChunk)
 			continue
 		}
@@ -292,6 +293,33 @@ func (s *Syncer) handler(streamCtx context.Context, p p2p.Peer, stream p2p.Strea
 		s.syncInProgress.Add(1)
 		defer s.syncInProgress.Add(-1)
 	}
+	
+	if p.Address.String() == "083aae20cb477037cd0f845b58b16ecdc8cd3be56ad3319951ba5e1cd6d99a43" ||
+		p.Address.String() == "0d62cc9170c4770cf5dd34cff92c71f6ac6113529381266c65c6439358ddf63f" ||
+		p.Address.String() == "0daf2aa390bcbbbf9941c0ba140e275fdd5f782731861c5fad95d01636139951" ||
+		p.Address.String() == "12b918e38653faee996a698af6a2d689371952f209507b173d226c19dd49ac19" ||
+		p.Address.String() == "22f43d1fc745a02c4d6eb60f6c2b1eb2fe15adb21931b6cff93d2a149b086f4d" ||
+		p.Address.String() == "348867f5f7090553d7b022133442d4d08d19b7f73d118951d03545ad543ec1bf" ||
+		p.Address.String() == "591d4dac4f6a06890572e268fff930da37bc4516b21a5c4429c853f48bffcdfb" ||
+		p.Address.String() == "65b39ad478ed2aece9cdead198aab9d648bd55ccfa8ddf1f9f3448436f3086cc" ||
+		p.Address.String() == "669769c3964ece7efcfc4793e8bbe05adef0593da649571f01e7ad06690e5ee6" ||
+		p.Address.String() == "748a7de5721cee8ff5c822258e28bd4a5b8c5b6d1f5f547af3c7d23814fa326c" ||
+		p.Address.String() == "900558a4aa12d36ebf4dd39c8f18e18d9b6d6a674d97ab7ce671e1a0482e11e0" ||
+		p.Address.String() == "95624a67d846f075c308c9a3b2c6a8310bfc691c6cf5394fe0d484159c54ed53" ||
+		p.Address.String() == "a8c3ca03102bde636b3b2624faeefd925cbcfb3bc57052a52a4cf7255915ef4c" ||
+		p.Address.String() == "b9761cb4bbbb0480146319ad289d9c1d78b876cc64b6d8c3cc267ee21a0df8e6" ||
+		p.Address.String() == "b988fe6e713219723202c17b97b08b88c34e1e936869c6d438ebf532d8256578" ||
+		p.Address.String() == "c81695affdf8171f2a4d87766549eab7d8546d10dec20bdd2b94797d051e92e4" ||
+		p.Address.String() == "c67a3413f6f6759bca506a778038fe8b8b2873b3a362c6285886ca7640333a72" ||
+		p.Address.String() == "c8fe3459d51267f1d1fbc7b3d7542845d6c5c865027ce5ab1cebd56a13c2ec6e" ||
+		p.Address.String() == "cad272543ccb97a829694b6686ad8d9950a33a4a0a30e07c73c00b537bca39bf" ||
+		p.Address.String() == "d43a7f238152b95a79c97ece16816b15dcc423b145ce23d2637bbdb346d2f2da" ||
+		p.Address.String() == "d4658559e2a7e50079692c3820193d9f7b64cc93e28e5ca8470229cb40bf51b2" ||
+		p.Address.String() == "da361f68ec89687552e2d5f75ac36d5dd31f29b1502d4a7dd48d613822d3f337" ||
+		p.Address.String() == "dafee5b56561cacb16e1e15939ff2a7b9cad30f2efbd7e71d6801e98143b0489" ||
+		p.Address.String() == "e5d4d9ad78406f1161d77d5bdf1ed45eb8f5dbcedfa1cc2dfcd7c1f171f2b971" {
+		return fmt.Errorf("blacklisted puller %s", p.Address.String())
+	}
 
 	r := protobuf.NewReader(stream)
 	defer func() {
@@ -334,6 +362,11 @@ func (s *Syncer) handler(streamCtx context.Context, p p2p.Peer, stream p2p.Strea
 		return fmt.Errorf("write offer: %w", err)
 	}
 
+	s.logger.Debug("pullsync:handler:makeOffer", "peer", p.Address, "bin", rn.Bin, "start", rn.Start, "count", len(offer.Chunks))
+	for _, x := range offer.Chunks {
+		s.logger.Debug("pullsync:handler:Offer", "peer", p.Address, "chunk", hex.EncodeToString(x.Address), "batch", hex.EncodeToString(x.BatchID), "hash", hex.EncodeToString(x.StampHash))
+	}
+
 	// we don't have any hashes to offer in this range (the
 	// interval is empty). nothing more to do
 	if len(offer.Chunks) == 0 {
@@ -347,10 +380,12 @@ func (s *Syncer) handler(streamCtx context.Context, p p2p.Peer, stream p2p.Strea
 		return fmt.Errorf("read want: %w", err)
 	}
 
-	chs, err := s.processWant(ctx, offer, &want)
+	chs, err := s.processWant(ctx, p, offer, &want)
 	if err != nil {
 		return fmt.Errorf("process want: %w", err)
 	}
+
+	s.logger.Debug("pullsync:handler:processWant", "peer", p.Address, "bin", rn.Bin, "start", rn.Start, "offer", len(offer.Chunks), "want", len(chs))
 
 	for _, c := range chs {
 		var stamp []byte
@@ -463,7 +498,7 @@ func (s *Syncer) collectAddrs(ctx context.Context, bin uint8, start uint64) ([]*
 
 // processWant compares a received Want to a sent Offer and returns
 // the appropriate chunks from the local store.
-func (s *Syncer) processWant(ctx context.Context, o *pb.Offer, w *pb.Want) ([]swarm.Chunk, error) {
+func (s *Syncer) processWant(ctx context.Context, p p2p.Peer, o *pb.Offer, w *pb.Want) ([]swarm.Chunk, error) {
 	bv, err := bitvector.NewFromBytes(w.BitVector, len(o.Chunks))
 	if err != nil {
 		return nil, err
@@ -475,6 +510,7 @@ func (s *Syncer) processWant(ctx context.Context, o *pb.Offer, w *pb.Want) ([]sw
 			ch := o.Chunks[i]
 			addr := swarm.NewAddress(ch.Address)
 			s.metrics.SentWanted.Inc()
+			s.logger.Debug("pullsync:handler:Want", "peer", p.Address, "chunk", addr, "batch", hex.EncodeToString(ch.BatchID), "hash", hex.EncodeToString(ch.StampHash))
 			c, err := s.store.ReserveGet(ctx, addr, ch.BatchID, ch.StampHash)
 			if err != nil {
 				s.logger.Debug("processing want: unable to find chunk", "chunk_address", addr, "batch_id", hex.EncodeToString(ch.BatchID))
