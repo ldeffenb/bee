@@ -5,10 +5,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/ethersphere/bee/v2/pkg/jsonhttp"
 	"github.com/ethersphere/bee/v2/pkg/storage"
@@ -151,6 +153,23 @@ func (s *Service) unpinRootHash(w http.ResponseWriter, r *http.Request) {
 	jsonhttp.OK(w, nil)
 }
 
+type refInfo struct {
+	Address swarm.Address       `json:"address"`
+	Error   bool                `json:"err"`
+	RefCnt  uint32              `json:"refCnt"`
+	Local   bool                `json:"local"`
+	Cached  bool                `json:"cached"`
+	Reserve uint32              `json:"reserve"`
+	Upload  uint32              `json:"upload"`
+	Repaired bool				`json:"repaired"`
+}
+
+type getResponse struct {
+	Reference swarm.Address `json:"reference"`
+	ChunkCount int64 `json:"chunkCount"`
+	Chunks []*refInfo `json:"chunks"`
+}
+
 // getPinnedRootHash returns back the given reference if its root hash is pinned.
 func (s *Service) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
 	logger := s.logger.WithName("get_pin").Build()
@@ -162,7 +181,14 @@ func (s *Service) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
 		response("invalid path params", logger, w)
 		return
 	}
-
+	queries := struct {
+		Repair *bool `map:"repair"`
+	}{}
+	if response := s.mapStructure(r.URL.Query(), &queries); response != nil {
+		response("invalid query params", logger, w)
+		return
+	}
+	
 	has, err := s.storer.HasPin(paths.Reference)
 	if err != nil {
 		logger.Debug("pinned root hash: has pin failed", "chunk_address", paths.Reference, "error", err)
@@ -176,18 +202,141 @@ func (s *Service) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonhttp.OK(w, struct {
-		Reference swarm.Address `json:"reference"`
-	}{
-		Reference: paths.Reference,
+	var chunks []*swarm.Address
+	var nChunks int64
+	err = s.storer.IteratePinCollection(paths.Reference, func(addr swarm.Address) (stop bool, err error) {
+		chunks = append(chunks, &addr)
+		nChunks++
+		return false, nil
 	})
+
+	if err != nil {
+		logger.Debug("pinned root hash: iterate pin failed", "chunk_address", paths.Reference, "error", err)
+		logger.Error(nil, "pinned root hash: iterate pin failed")
+		jsonhttp.InternalServerError(w, "pinned root hash: iterate reference failed")
+		return
+	}
+
+	var refs []*refInfo
+	var dHas, dGetRefCnt, dIsCached, dIsReserved, dIsPendingUpload time.Duration
+	start := time.Now()
+	for _, c := range chunks {
+		good := true
+		dStart := time.Now()
+		h, e := s.storer.ChunkStore().Has(context.Background(), *c)
+		if e != nil {
+			good = false
+			logger.Debug("pinned root hash: ChunkStore.Has failed", "chunk_address", *c, "error", e)
+		}
+		dHas += time.Since(dStart)
+		dStart = time.Now()
+		var r uint32
+		/*r, e := s.storer.ChunkStore().GetRefCnt(context.Background(), *c)
+		if e != nil {
+			good = false
+			logger.Debug("pinned root hash: ChunkStore.GetRefCnt failed", "chunk_address", *c, "error", e)
+		}*/
+		dGetRefCnt += time.Since(dStart)
+		dStart = time.Now()
+		cached := false
+		/*cached, e := s.storer.IsCached(*c)
+		if e != nil {
+			good = false
+			logger.Debug("pinned root hash: IsCached failed", "chunk_address", *c, "error", e)
+		}*/
+		dIsCached += time.Since(dStart)
+
+		dStart = time.Now()
+		reserved := uint32(0)
+		/*reserved, e := s.storer.IsReserved(*c)
+		if e != nil {
+			good = false
+			logger.Debug("pinned root hash: IsReserved failed", "chunk_address", *c, "error", e)
+		}*/
+		dIsReserved += time.Since(dStart)
+		dStart = time.Now()
+		uploading := uint32(0)
+		/*uploading, e := s.storer.IsPendingUpload(*c)
+		if e != nil {
+			good = false
+			logger.Debug("pinned root hash: IsPendingUpload failed", "chunk_address", *c, "error", e)
+		}*/
+		dIsPendingUpload += time.Since(dStart)
+		refs = append(refs, &refInfo{
+			Address: *c,
+			Error: !good,
+			Local: h,
+			RefCnt: r,
+			Cached: cached,
+			Reserve: reserved,
+			Upload: uploading,
+		})
+	}
+	delta := time.Since(start)
+	if delta > time.Second {
+		logger.Debug("pinned root has: SLOW", "count", len(refs), "elapsed", delta,
+					"has", dHas, "refCnt", dGetRefCnt, "cache", dIsCached, "rsv", dIsReserved, "upl", dIsPendingUpload)
+	}
+
+/*
+	if queries.Repair != nil && *queries.Repair {	// ToDo: This should really be in a POST or PUT
+		getter := s.storer.Download(true)
+		for _, ref := range refs {
+			var newRefCnt uint32 = 100	// Need at least 100 for the pin
+			if ref.Cached {
+				newRefCnt++
+			}
+			newRefCnt += ref.Reserve
+			newRefCnt += ref.Upload
+			if !ref.Local {
+				_, err := getter.Get(r.Context(), ref.Address)
+				if err != nil {
+					logger.Warning("pinned root hash: Download failed", "address", ref.Address, "error", err)
+				} else {
+					ref.Repaired = true
+				}
+			}
+			if ref.RefCnt < newRefCnt {
+				delta := newRefCnt-ref.RefCnt + 100	// 100 more to double-protect the pin against erosion
+				_, err := s.storer.ChunkStore().IncRefCnt(context.Background(), ref.Address, delta)
+				if err != nil {
+					logger.Warning("pinned root hash: IncRefCnt failed", "address", ref.Address, "delta", delta, "error", err)
+				} else {
+					ref.Repaired = true
+				}
+			}
+		}
+	}
+*/
+
+	jsonhttp.OK(w, getResponse{
+		Reference: paths.Reference,
+		ChunkCount: nChunks,
+		Chunks: refs,
+	})
+
+//	jsonhttp.OK(w, struct {
+//		Reference swarm.Address `json:"reference"`
+//	}{
+//		Reference: paths.Reference,
+//	})
 }
 
 // listPinnedRootHashes lists all the references of the pinned root hashes.
 func (s *Service) listPinnedRootHashes(w http.ResponseWriter, r *http.Request) {
 	logger := s.logger.WithName("get_pins").Build()
 
-	pinned, err := s.storer.Pins()
+	queries := struct {
+		Offset    int  `map:"offset"`
+		Limit     int  `map:"limit"`
+	}{}
+
+	if response := s.mapStructure(r.URL.Query(), &queries); response != nil {
+		response("invalid query params", logger, w)
+		return
+	}
+
+	pinned, err := s.storer.Pins(queries.Offset, queries.Limit)
 	if err != nil {
 		logger.Debug("list pinned root references: unable to list references", "error", err)
 		logger.Error(nil, "list pinned root references: unable to list references")

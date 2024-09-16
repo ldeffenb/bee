@@ -81,7 +81,7 @@ func (db *DB) DeletePin(ctx context.Context, root swarm.Address) (err error) {
 }
 
 // Pins is the implementation of the PinStore.Pins method.
-func (db *DB) Pins() (address []swarm.Address, err error) {
+func (db *DB) Pins(offset, limit int) (address []swarm.Address, err error) {
 	dur := captureDuration(time.Now())
 	defer func() {
 		db.metrics.MethodCallsDuration.WithLabelValues("pinstore", "Pins").Observe(dur())
@@ -92,7 +92,7 @@ func (db *DB) Pins() (address []swarm.Address, err error) {
 		}
 	}()
 
-	return pinstore.Pins(db.storage.IndexStore())
+	return pinstore.Pins(db.storage.IndexStore(), offset, limit)
 }
 
 // HasPin is the implementation of the PinStore.HasPin method.

@@ -308,7 +308,7 @@ func (p *PinIntegrity) Check(ctx context.Context, logger log.Logger, pin string,
 		pins = append(pins, addr)
 	} else {
 		var err error
-		pins, err = pinstore.Pins(p.Store)
+		pins, err = pinstore.Pins(p.Store, 0, 0)
 		if err != nil {
 			logger.Error(err, "get pins")
 			return
