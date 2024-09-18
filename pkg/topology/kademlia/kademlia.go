@@ -252,6 +252,8 @@ func New(
 		storageRadius:     swarm.MaxPO,
 	}
 
+	logger.Info("pruning if zero", "StaticNodes", len(k.opt.StaticNodes))
+
 	if k.opt.PruneFunc == nil {
 		k.opt.PruneFunc = k.pruneOversaturatedBins
 	}
@@ -533,20 +535,22 @@ func (k *Kad) manage() {
 	balanceChan := make(chan *peerConnInfo)
 	go k.connectionAttemptsHandler(ctx, &wg, neighbourhoodChan, balanceChan)
 
-	k.wg.Add(1)
-	go func() {
-		defer k.wg.Done()
-		for {
-			select {
-			case <-k.halt:
-				return
-			case <-k.quit:
-				return
-			case <-time.After(k.opt.PruneWakeup):
-				k.opt.PruneFunc(k.neighborhoodDepth())
+	if (len(k.opt.StaticNodes) == 0) {
+		k.wg.Add(1)
+		go func() {
+			defer k.wg.Done()
+			for {
+				select {
+				case <-k.halt:
+					return
+				case <-k.quit:
+					return
+				case <-time.After(k.opt.PruneWakeup):
+					k.opt.PruneFunc(k.neighborhoodDepth())
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	k.wg.Add(1)
 	go func() {
@@ -1136,6 +1140,10 @@ func (k *Kad) Pick(peer p2p.Peer) bool {
 	oversaturated := k.opt.SaturationFunc(po, k.connectedPeers, k.opt.ExcludeFunc(im.Reachability(false)))
 	// pick the peer if we are not oversaturated
 	if !oversaturated {
+		return true
+	}
+	if (len(k.opt.StaticNodes) > 0) {
+		k.logger.Debug("pruning. pick oversaturated", "bin", po, "peer", peer.Address)
 		return true
 	}
 	k.metrics.PickCallsFalse.Inc()
