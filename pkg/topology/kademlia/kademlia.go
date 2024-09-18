@@ -1143,7 +1143,7 @@ func (k *Kad) Pick(peer p2p.Peer) bool {
 		return true
 	}
 	if (len(k.opt.StaticNodes) > 0) {
-		k.logger.Debug("pruning. pick oversaturated", "bin", po, "peer", peer.Address)
+		k.logger.Info("pruning. pick oversaturated", "bin", po, "peer", peer.Address)
 		return true
 	}
 	k.metrics.PickCallsFalse.Inc()
