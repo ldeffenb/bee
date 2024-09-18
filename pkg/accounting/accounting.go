@@ -995,6 +995,7 @@ func (a *Accounting) NotifyPaymentSent(peer swarm.Address, amount *big.Int, rece
 	nextBalance := new(big.Int).Add(currentBalance, amount)
 
 	loggerV2.Debug("registering payment sent", "peer_address", peer, "amount", amount, "new_balance", nextBalance)
+	a.logger.Info("registering payment sent", "peer_address", peer, "amount", amount, "new_balance", nextBalance)
 
 	err = a.store.Put(peerBalanceKey(peer), nextBalance)
 	if err != nil {
