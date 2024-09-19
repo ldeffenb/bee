@@ -1143,7 +1143,7 @@ func (k *Kad) Pick(peer p2p.Peer) bool {
 		return true
 	}
 	if (len(k.opt.StaticNodes) > 0) {
-		k.logger.Info("pruning. pick oversaturated", "bin", po, "peer", peer.Address)
+		k.logger.Info("pick oversaturated", "bin", po, "peer", peer.Address)
 		return true
 	}
 	k.metrics.PickCallsFalse.Inc()
@@ -1199,7 +1199,10 @@ func (k *Kad) Connected(ctx context.Context, peer p2p.Peer, forceConnection bool
 			return k.onConnected(ctx, address)
 		}
 		if !forceConnection {
-			return topology.ErrOversaturated
+			if (len(k.opt.StaticNodes) <= 0) {
+				return topology.ErrOversaturated
+			}
+			k.logger.Info("Connect oversaturated", "bin", po, "peer", peer.Address)
 		}
 	}
 
