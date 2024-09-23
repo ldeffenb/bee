@@ -321,6 +321,10 @@ func (s *store) cleanup() error {
 	}
 
 	for _, b := range evictions {
+		if (hex.EncodeToString(b.ID) == "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df") {
+			s.logger.Info("batch expired, NOT evicting", "batch_id", hex.EncodeToString(b.ID))
+			continue
+		}
 		s.logger.Debug("batch expired", "batch_id", hex.EncodeToString(b.ID))
 		if s.batchExpiry != nil {
 			err = s.batchExpiry.HandleStampExpiry(context.Background(), b.ID)

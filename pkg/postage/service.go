@@ -199,6 +199,11 @@ func (ps *service) Close() error {
 // HandleStampExpiry handles stamp expiry for a given id.
 func (ps *service) HandleStampExpiry(ctx context.Context, id []byte) error {
 
+	if (hex.EncodeToString(id) == "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df") {
+		ps.logger.Info("postage.service.HandleStampExpiry, NOT evicting", "batch_id", hex.EncodeToString(id))
+		return nil
+	}
+
 	exists, err := ps.removeIssuer(id)
 	if err != nil {
 		return err

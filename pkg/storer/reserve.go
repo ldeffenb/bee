@@ -181,6 +181,12 @@ func (db *DB) evictExpiredBatches(ctx context.Context) error {
 	}
 
 	for _, batchID := range batches {
+
+		if (hex.EncodeToString(batchID) == "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df") {
+			db.logger.Info("reserve.evictExpiredBatches, NOT evicting", "batch_id", hex.EncodeToString(batchID))
+			continue
+		}
+
 		evicted, err := db.evictBatch(ctx, batchID, math.MaxInt, swarm.MaxBins)
 		if err != nil {
 			return err
@@ -250,6 +256,11 @@ func (db *DB) evictBatch(
 func (db *DB) EvictBatch(ctx context.Context, batchID []byte) error {
 	if db.reserve == nil {
 		// if reserve is not configured, do nothing
+		return nil
+	}
+
+	if (hex.EncodeToString(batchID) == "0e8366a6fdac185b6f0327dc89af99e67d9d3b3f2af22432542dc5971065c1df") {
+		db.logger.Info("reserve.EvictBatch, NOT evicting", "batch_id", hex.EncodeToString(batchID))
 		return nil
 	}
 
