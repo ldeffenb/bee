@@ -70,6 +70,7 @@ type Agent struct {
 	chainStateGetter       postage.ChainStateGetter
 	commitLock             sync.Mutex
 	health                 Health
+	capacityDoubling       uint8
 }
 
 func New(overlay swarm.Address,
@@ -89,6 +90,7 @@ func New(overlay swarm.Address,
 	tranService transaction.Service,
 	health Health,
 	logger log.Logger,
+	capacityDoubling uint8,
 ) (*Agent, error) {
 	a := &Agent{
 		overlay:                overlay,
@@ -104,6 +106,7 @@ func New(overlay swarm.Address,
 		redistributionStatuser: redistributionStatuser,
 		health:                 health,
 		chainStateGetter:       chainStateGetter,
+		capacityDoubling:       capacityDoubling,
 	}
 
 	state, err := NewRedistributionState(logger, ethAddress, stateStore, erc20Service, tranService)
@@ -222,7 +225,8 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 		a.state.SetHealthy(a.health.IsHealthy())
 		go a.state.purgeStaleRoundData()
 
-		isFrozen, err := a.redistributionStatuser.IsOverlayFrozen(ctx, block)
+		// check if node is frozen starting from the next block
+		isFrozen, err := a.redistributionStatuser.IsOverlayFrozen(ctx, block+1)
 		if err != nil {
 			a.logger.Error(err, "error checking if stake is frozen")
 		} else {
@@ -444,14 +448,15 @@ DelayLoop:
 }
 
 func (a *Agent) handleSample(ctx context.Context, round uint64) (bool, error) {
-	storageRadius := a.store.StorageRadius()
+	// minimum proximity between the achor and the stored chunks
+	commitedDepth := a.store.StorageRadius() + a.capacityDoubling
 
 	if a.state.IsFrozen() {
 		a.logger.Info("skipping round because node is frozen")
 		return false, nil
 	}
 
-	isPlaying, err := a.contract.IsPlaying(ctx, storageRadius)
+	isPlaying, err := a.contract.IsPlaying(ctx, commitedDepth)
 	if err != nil {
 		a.metrics.ErrCheckIsPlaying.Inc()
 		return false, err
@@ -484,21 +489,21 @@ func (a *Agent) handleSample(ctx context.Context, round uint64) (bool, error) {
 	}
 
 	now := time.Now()
-	sample, err := a.makeSample(ctx, storageRadius)
+	sample, err := a.makeSample(ctx, commitedDepth)
 	if err != nil {
 		return false, err
 	}
 	dur := time.Since(now)
 	a.metrics.SampleDuration.Set(dur.Seconds())
 
-	a.logger.Info("produced sample", "hash", sample.ReserveSampleHash, "radius", sample.StorageRadius, "round", round)
+	a.logger.Info("produced sample", "hash", sample.ReserveSampleHash, "radius", commitedDepth, "round", round)
 
 	a.state.SetSampleData(round, sample, dur)
 
 	return true, nil
 }
 
-func (a *Agent) makeSample(ctx context.Context, storageRadius uint8) (SampleData, error) {
+func (a *Agent) makeSample(ctx context.Context, commitedDepth uint8) (SampleData, error) {
 	salt, err := a.contract.ReserveSalt(ctx)
 	if err != nil {
 		return SampleData{}, err
@@ -509,7 +514,7 @@ func (a *Agent) makeSample(ctx context.Context, storageRadius uint8) (SampleData
 		return SampleData{}, err
 	}
 
-	rSample, err := a.store.ReserveSample(ctx, salt, storageRadius, uint64(timeLimiter), a.minBatchBalance())
+	rSample, err := a.store.ReserveSample(ctx, salt, commitedDepth, uint64(timeLimiter), a.minBatchBalance())
 	if err != nil {
 		return SampleData{}, err
 	}
@@ -523,7 +528,7 @@ func (a *Agent) makeSample(ctx context.Context, storageRadius uint8) (SampleData
 		Anchor1:            salt,
 		ReserveSampleItems: rSample.Items,
 		ReserveSampleHash:  sampleHash,
-		StorageRadius:      storageRadius,
+		StorageRadius:      commitedDepth,
 	}
 
 	return sample, nil

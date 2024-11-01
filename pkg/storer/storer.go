@@ -178,6 +178,10 @@ type Debugger interface {
 	DebugInfo(context.Context) (Info, error)
 }
 
+type NeighborhoodStats interface {
+	NeighborhoodsStat(ctx context.Context) ([]*NeighborhoodStat, error)
+}
+
 type memFS struct {
 	afero.Fs
 }
@@ -240,6 +244,7 @@ const (
 	defaultDisableSeeksCompaction = false
 	defaultCacheCapacity          = uint64(1_000_000)
 	defaultBgCacheWorkers         = 16
+	DefaultReserveCapacity        = 1 << 22 // 4194304 chunks
 
 	indexPath  = "indexstore"
 	sharkyPath = "sharky"
@@ -279,9 +284,9 @@ func initDiskRepository(
 		return nil, nil, nil, fmt.Errorf("failed creating levelDB index store: %w", err)
 	}
 
-	err = migration.Migrate(store, "core-migration", localmigration.BeforeInitSteps(store))
+	err = migration.Migrate(store, "core-migration", localmigration.BeforeInitSteps(store, opts.Logger))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed core migration: %w", err)
+		return nil, nil, nil, errors.Join(store.Close(), fmt.Errorf("failed core migration: %w", err))
 	}
 
 	if opts.LdbStats.Load() != nil {
@@ -379,9 +384,10 @@ type Options struct {
 	RadiusSetter   topology.SetStorageRadiuser
 	StateStore     storage.StateStorer
 
-	ReserveCapacity       int
-	ReserveWakeUpDuration time.Duration
-	ReserveMinEvictCount  uint64
+	ReserveCapacity         int
+	ReserveWakeUpDuration   time.Duration
+	ReserveMinEvictCount    uint64
+	ReserveCapacityDoubling int
 
 	CacheCapacity      uint64
 	CacheMinEvictCount uint64
@@ -397,7 +403,7 @@ func defaultOptions() *Options {
 		LdbDisableSeeksCompaction: defaultDisableSeeksCompaction,
 		CacheCapacity:             defaultCacheCapacity,
 		Logger:                    log.Noop,
-		ReserveCapacity:           4_194_304, // 2^22 chunks
+		ReserveCapacity:           DefaultReserveCapacity,
 		ReserveWakeUpDuration:     time.Minute * 30,
 	}
 }
@@ -437,17 +443,18 @@ type DB struct {
 	validStamp       postage.ValidStampFn
 	setSyncerOnce    sync.Once
 	syncer           Syncer
-	opts             workerOpts
+	reserveOptions   reserveOpts
 
 	pinIntegrity *PinIntegrity
 }
 
-type workerOpts struct {
-	reserveWarmupDuration time.Duration
-	reserveWakeupDuration time.Duration
-	reserveMinEvictCount  uint64
-	cacheMinEvictCount    uint64
-	minimumRadius         uint8
+type reserveOpts struct {
+	warmupDuration     time.Duration
+	wakeupDuration     time.Duration
+	minEvictCount      uint64
+	cacheMinEvictCount uint64
+	minimumRadius      uint8
+	capacityDoubling   int
 }
 
 // New returns a newly constructed DB object which implements all the above
@@ -483,6 +490,12 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 		}
 	}
 
+	defer func() {
+		if err != nil && dbCloser != nil {
+			err = errors.Join(err, dbCloser.Close())
+		}
+	}()
+
 	sharkyBasePath := ""
 	if dirPath != "" {
 		sharkyBasePath = path.Join(dirPath, sharkyPath)
@@ -496,7 +509,7 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 		)
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed regular migration: %w", err)
 	}
 
 	cacheObj, err := cache.New(ctx, st.IndexStore(), opts.CacheCapacity)
@@ -528,12 +541,13 @@ func New(ctx context.Context, dirPath string, opts *Options) (*DB, error) {
 		validStamp:       opts.ValidStamp,
 		events:           events.NewSubscriber(),
 		reserveBinEvents: events.NewSubscriber(),
-		opts: workerOpts{
-			reserveWarmupDuration: opts.WarmupDuration,
-			reserveWakeupDuration: opts.ReserveWakeUpDuration,
-			reserveMinEvictCount:  opts.ReserveMinEvictCount,
-			cacheMinEvictCount:    opts.CacheMinEvictCount,
-			minimumRadius:         uint8(opts.MinimumStorageRadius),
+		reserveOptions: reserveOpts{
+			warmupDuration:     opts.WarmupDuration,
+			wakeupDuration:     opts.ReserveWakeUpDuration,
+			minEvictCount:      opts.ReserveMinEvictCount,
+			cacheMinEvictCount: opts.CacheMinEvictCount,
+			minimumRadius:      uint8(opts.MinimumStorageRadius),
+			capacityDoubling:   opts.ReserveCapacityDoubling,
 		},
 		directUploadLimiter: make(chan struct{}, pusher.ConcurrentPushes),
 		pinIntegrity:        pinIntegrity,

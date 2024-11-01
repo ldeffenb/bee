@@ -442,11 +442,9 @@ func (k *Kad) connectionAttemptsHandler(ctx context.Context, wg *sync.WaitGroup,
 			return
 		case errors.Is(err, p2p.ErrPeerBlocklisted):
 			k.logger.Debug("peer still in blocklist", "peer_address", bzzAddr)
-			k.logger.Warning("peer still in blocklist")
 			return
 		case err != nil:
 			k.logger.Debug("peer not reachable from kademlia", "peer_address", bzzAddr, "error", err)
-			k.logger.Warning("peer not reachable when attempting to connect")
 			return
 		}
 
@@ -459,7 +457,7 @@ func (k *Kad) connectionAttemptsHandler(ctx context.Context, wg *sync.WaitGroup,
 
 		k.recalcDepth()
 
-		k.logger.Info("connected to peer", "peer_address", peer.addr, "proximity_order", peer.po)
+		k.logger.Debug("connected to peer", "peer_address", peer.addr, "proximity_order", peer.po)
 		k.notifyManageLoop()
 		k.notifyPeerSig()
 	}
@@ -1229,7 +1227,7 @@ func (k *Kad) onConnected(ctx context.Context, addr swarm.Address) error {
 
 // Disconnected is called when peer disconnects.
 func (k *Kad) Disconnected(peer p2p.Peer) {
-	k.logger.Info("disconnected peer", "peer_address", peer.Address)
+	k.logger.Debug("disconnected peer", "peer_address", peer.Address)
 
 	k.connectedPeers.Remove(peer.Address)
 
