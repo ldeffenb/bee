@@ -1649,6 +1649,8 @@ func createMetricsSnapshotView(ss *im.Snapshot) *topology.MetricSnapshotView {
 		ConnectionTotalDuration:    ss.ConnectionTotalDuration.Truncate(time.Second).Seconds(),
 		SessionConnectionDuration:  ss.SessionConnectionDuration.Truncate(time.Second).Seconds(),
 		SessionConnectionDirection: string(ss.SessionConnectionDirection),
+		LoginCount:					ss.LoginCount,
+		LogoutCount:				ss.LogoutCount,
 		LatencyEWMA:                ss.LatencyEWMA.Milliseconds(),
 		Reachability:               ss.Reachability.String(),
 		Healthy:                    ss.Healthy,

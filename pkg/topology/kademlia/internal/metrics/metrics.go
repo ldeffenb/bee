@@ -43,6 +43,7 @@ func PeerLogIn(t time.Time, dir PeerConnectionDirection) RecordOp {
 		cs.Lock()
 		defer cs.Unlock()
 
+		cs.loginCount++
 		if cs.isLoggedIn {
 			return // Ignore when the peer is already logged in.
 		}
@@ -67,6 +68,7 @@ func PeerLogOut(t time.Time) RecordOp {
 		cs.Lock()
 		defer cs.Unlock()
 
+		cs.logoutCount++
 		if !cs.isLoggedIn {
 			return // Ignore when the peer is not logged in.
 		}
@@ -135,6 +137,8 @@ type Snapshot struct {
 	ConnectionTotalDuration    time.Duration
 	SessionConnectionDuration  time.Duration
 	SessionConnectionDirection PeerConnectionDirection
+	LoginCount				   uint64
+	LogoutCount				   uint64
 	LatencyEWMA                time.Duration
 	Reachability               p2p.ReachabilityStatus
 	Healthy                    bool
@@ -162,6 +166,8 @@ type Counters struct {
 	sessionConnRetry     uint64
 	sessionConnDuration  time.Duration
 	sessionConnDirection PeerConnectionDirection
+	loginCount			 uint64
+	logoutCount			 uint64
 	latencyEWMA          time.Duration
 	ReachabilityStatus   p2p.ReachabilityStatus
 	Healthy              bool
@@ -211,6 +217,8 @@ func (cs *Counters) snapshot(t time.Time) *Snapshot {
 		ConnectionTotalDuration:    connTotalDuration,
 		SessionConnectionDuration:  sessionConnDuration,
 		SessionConnectionDirection: cs.sessionConnDirection,
+		LoginCount:					cs.loginCount,
+		LogoutCount:				cs.logoutCount,
 		LatencyEWMA:                cs.latencyEWMA,
 		Reachability:               cs.ReachabilityStatus,
 		Healthy:                    cs.Healthy,

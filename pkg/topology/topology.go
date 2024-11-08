@@ -81,6 +81,8 @@ type MetricSnapshotView struct {
 	ConnectionTotalDuration    float64 `json:"connectionTotalDuration"`
 	SessionConnectionDuration  float64 `json:"sessionConnectionDuration"`
 	SessionConnectionDirection string  `json:"sessionConnectionDirection"`
+	LoginCount				   uint64  `json:"loginCount"`
+	LogoutCount				   uint64  `json:"logoutCount"`
 	LatencyEWMA                int64   `json:"latencyEWMA"`
 	Reachability               string  `json:"reachability"`
 	Healthy                    bool    `json:"healthy"`
